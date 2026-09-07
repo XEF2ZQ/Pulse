@@ -2,11 +2,13 @@
 <h1 align="center">Pulse</h1>
 <p align="center"><strong>Adaptive Windows power policy, with bounded bursts and recoverable settings.</strong></p>
 <p align="center">C++20 · Native Win32 · Windows 11 x64 · Battery-first · G Helper companion</p>
-<p align="center"><a href="https://github.com/XEF2ZQ/Pulse/actions/workflows/windows.yml"><img src="https://github.com/XEF2ZQ/Pulse/actions/workflows/windows.yml/badge.svg" alt="Windows build and tests"></a></p>
+<p align="center"><a href="docs/validation.md">Local validation: 5/5 suites passed</a> · <a href="https://github.com/XEF2ZQ/Pulse/actions/workflows/windows.yml">Windows CI workflow</a></p>
 
 Pulse explores a practical systems problem: keep light work efficient while temporarily giving interactive requests and sustained productive work more CPU headroom. It changes supported Windows power settings through native APIs, then restores the settings it owned when control ends.
 
 **Current snapshot: 1.1.2-scheduler-preview.** The adaptive power controller is implemented and has been exercised on one ASUS Ryzen AI 9 HX 370 laptop. The optional scheduler guard is diagnostic groundwork, **off by default**; it does not place threads or alter their QoS. This is an experimental desktop utility, with measured limitations rather than a universal compatibility claim.
+
+**Build verification:** the local Release build and all five CTest suites passed. Hosted CI has not executed yet: the initial run was blocked before any job steps started. A hosted build artifact is therefore not yet available.
 
 ## Behavior at a glance
 

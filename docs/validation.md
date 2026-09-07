@@ -10,6 +10,8 @@ ASUS ROG Zephyrus G16 GA605WI; AMD Ryzen AI 9 HX 370, 12 physical cores / 24 log
 
 The 1.1.2 scheduler-preview source passed native Release compilation and local policy, topology and GUI checks on September 7. On September 8, the publication snapshot rebuilt successfully and passed all five local CTest entries: power policy, scheduler unit, live topology, scheduler live and native GUI. No live power-control exercise was rerun for this documentation/build-only publication.
 
+The initial GitHub-hosted run was blocked before any job steps started. Local results below must not be interpreted as a successful hosted CI run. The configured workflow can be rerun when hosted execution is available.
+
 | Layer | Recorded result / scope |
 |---|---|
 | Existing burst/compute policies | 202,806 assertions: load edges, sustained work, deadlines, quiet exit, budget and blocked states |

@@ -28,7 +28,7 @@ MSVC builds use C++20 and a static C/C++ runtime. The application and topology i
 
 Run all local checks with `ctest --test-dir build --output-on-failure`. The topology integration checks may reject incomplete virtual-machine topology; their purpose is to validate the actual target, not to assume every host exposes sufficient data.
 
-The GitHub workflow builds Release on `windows-2025`, runs the `unit` label and uploads the executable plus CTest logs as an unsigned engineering artifact. Hosted CI does not run benchmarks, apply power settings or establish compatibility with a physical laptop. The action versions are pinned to reviewed commit identifiers. Workflow permissions are limited to reading repository contents.
+The GitHub workflow is configured to build Release on `windows-2025`, run the `unit` label and upload the executable plus CTest logs as an unsigned engineering artifact. At publication, the initial hosted run was blocked before any job steps started; hosted verification and its artifact remain pending. Hosted CI does not run benchmarks, apply power settings or establish compatibility with a physical laptop. The action versions are pinned to reviewed commit identifiers. Workflow permissions are limited to reading repository contents.
 
 ## Package provenance
 
