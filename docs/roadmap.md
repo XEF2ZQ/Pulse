@@ -1,6 +1,6 @@
 # Roadmap and acceptance gates
 
-These items are future work, not promises about the current executable.
+These are remaining validation and development goals. The 1.2 patch implements sampled per-tree detection and registered exit waits; broader coverage and latency distributions remain to be established.
 
 | Milestone | Proposed work | Evidence needed before claiming completion |
 |---|---|---|
@@ -11,15 +11,15 @@ These items are future work, not promises about the current executable.
 | Wider compatibility | Additional AMD/Intel machines, OEM configurations, sleep and power-source transitions | Per-device validation, unsupported-capability fallback and recovery results |
 | Distribution maturity | Signed release packaging and reviewed installation/upgrade/uninstall flows | Clean-machine tests, provenance, migration/rollback checks and redistribution review |
 
-## Open-set detector direction
+## Further open-set detector validation
 
-Known executable candidates remain a fast path, but the desired general detector should reason about productive CPU work independently of names. Candidate evidence includes attributable CPU-time demand over a process tree, runnable pressure where observable, persistence, foreground intent and application-provided job boundaries. No single signal proves intent; steady video or voice must not be treated as productive compute merely because CPU usage is high.
+Known executable candidates remain a fast path, and the 1.2 general detector reasons about productive CPU work independently of names. Candidate evidence includes attributable CPU-time demand over a process tree, runnable pressure where observable, persistence, foreground intent and application-provided job boundaries. No single signal proves intent; steady video or voice must not be treated as productive compute merely because CPU usage is high.
 
 Keep classification per candidate workload rather than imposing a global media veto. An unrelated video must not suppress a concurrent compiler. Unknown or ambiguous real-time hosts should remain conservative until evidence justifies adaptation. Hardware instruction counters and ETW collection add privileges/overhead/compatibility constraints and are not assumed to be free.
 
 ## Completion latency direction
 
-Registered process waits can shorten completion handling for short-lived tools. They must use valid process identity/handles, bounded registration, cancellation-safe teardown and child-work tracking. Long-lived IDEs/render hosts need another completion signal or quiet evidence. End-to-end measurements must include Windows policy application time; a millisecond notification cannot guarantee an instantaneous physical clock reduction.
+The 1.2 patch registers bounded process waits to shorten completion handling for short-lived tools. They must use valid process identity/handles, bounded registration, cancellation-safe teardown and child-work tracking. Long-lived IDEs/render hosts need another completion signal or quiet evidence. End-to-end measurements must include Windows policy application time; a millisecond notification cannot guarantee an instantaneous physical clock reduction.
 
 ## Hardware tuning boundary
 

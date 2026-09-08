@@ -1,6 +1,6 @@
 #include "power.h"
 #include "policy.h"
-#include "process_monitor.h"
+#include "productive_monitor.h"
 #include "scheduler_policy.h"
 #include <dbt.h>
 #include <windowsx.h>
@@ -24,6 +24,7 @@
 
 using namespace pulse;
 constexpr wchar_t ClassName[]=L"PulseAdaptivePowerWindow";
+constexpr UINT ProductiveExitMsg=WM_APP+8, EditIntentMsg=WM_APP+9;
 constexpr UINT TrayMsg=WM_APP+1, QuitMsg=WM_APP+2, ReportMsg=WM_APP+3, EventMsg=WM_APP+4;
 constexpr UINT BenchmarkMsg=WM_APP+5, ModeMsg=WM_APP+6, SchedulerRefreshMsg=WM_APP+7;
 constexpr UINT TickTimer=1, StopTimer=2, CheckTimer=3;
@@ -32,7 +33,7 @@ static HWND window=nullptr;
 static Power power;
 static Policy policy;
 static ComputePolicy compute;
-static ProcessMonitor processMonitor;
+static ProductiveMonitor processMonitor;
 static bool armed=false, manageAC=false;
 static scheduler::SchedulerGuard schedulerGuard;
 static bool schedulerTopologyDirty=true, schedulerRefreshQueued=false;
@@ -46,12 +47,15 @@ static void schedulerRefresh(){
     }
 }
 static uint64_t lastComputeSample=0;
-static PowerState state(){return policy.burst?PowerState::Burst:compute.active?PowerState::Compute:PowerState::Efficiency;}
+static PowerState state(){return compute.active?PowerState::Compute:policy.burst?PowerState::Burst:PowerState::Efficiency;}
 static Sample sample;
 static bool enabled=false, efficientOnly=false, dryRun=false, locked=false, displayOff=false, suspended=false;
 static bool keyboardRegistered=false, shuttingDown=false, autoStart=false;
 static bool appliedOnBattery=true;
 static HWINEVENTHOOK foregroundHook=nullptr, titleHook=nullptr;
+static HWINEVENTHOOK editValueHook=nullptr,editCaptureHook=nullptr;
+static uint64_t lastEditSignal=0;
+static uint64_t editorProbes=0;
 static HPOWERNOTIFY displayNotification=nullptr, sourceNotification=nullptr, schemeNotification=nullptr, saverNotification=nullptr;
 static HANDLE foregroundProcess=nullptr, guardianProcess=nullptr;
 static DWORD foregroundPid=0;
@@ -84,7 +88,7 @@ static const COLORREF Background=RGB(13,20,31), Card=RGB(23,33,46), Text=RGB(234
 static int px(int value) { return static_cast<int>(value*uiScale+0.5); }
 static double preciseMs() { LARGE_INTEGER t,f;QueryPerformanceCounter(&t);QueryPerformanceFrequency(&f);return 1000.0*static_cast<double>(t.QuadPart)/f.QuadPart; }
 static void trace(const wchar_t* source,double begin,bool accepted,DWORD error=0) {
-    if(recording)traces[traceCount++%traces.size()]={begin,preciseMs(),source,policy.burst,accepted,error};
+    if(recording)traces[traceCount++%traces.size()]={begin,preciseMs(),source,state()==PowerState::Burst,accepted,error};
 }
 static std::wstring fixed(double value,int places=2) { std::wostringstream o;o<<std::fixed<<std::setprecision(places)<<value;return o.str(); }
 static void logEvent(const std::wstring& value) {
@@ -130,17 +134,21 @@ static bool applyState(const wchar_t* source=L"Policy",double began=0) {
     trace(source,began,true);
     lastApplied=GetTickCount64();
     appliedOnBattery=sample.battery;
-    if(policy.burst)burstAppliedAt=lastApplied;
+    if(state()==PowerState::Burst)burstAppliedAt=lastApplied;
     else if(burstAppliedAt){burstMs+=lastApplied-burstAppliedAt;burstAppliedAt=0;}
-    logEvent(std::wstring(policy.burst?L"Burst: ":compute.active?L"Compute: ":L"Efficiency: ")+(compute.active&&!policy.burst?L"Sustained CPU work; Balanced / Efficient Aggressive":policy.reason));
-    if(policy.burst)++bursts;
+    logEvent(std::wstring(state()==PowerState::Burst?L"Burst: ":compute.active?L"Compute: ":L"Efficiency: ")+(compute.active?L"Productive CPU demand; Best performance / Efficient Aggressive":policy.reason));
+    if(state()==PowerState::Burst)++bursts;
     setTimer();updateUi();return true;
 }
 static void requestBurst(Signal signal,const wchar_t* source=L"Foreground") {
     double began=recording?preciseMs():0;
     if(!enabled||efficientOnly){trace(source,began,false);return;}
     environment();
-    if(policy.request(signal,sample))applyState(source,began);else trace(source,began,false);
+    const auto before=state();
+    if(policy.request(signal,sample)) {
+        if(before!=state())applyState(source,began);
+        else {trace(source,began,true);setTimer();}
+    }else trace(source,began,false);
 }
 static void CALLBACK foregroundEvent(HWINEVENTHOOK,DWORD,HWND hwnd,LONG,LONG,DWORD,DWORD) {
     if(window&&hwnd)PostMessageW(window,EventMsg,0,reinterpret_cast<LPARAM>(hwnd));
@@ -150,6 +158,16 @@ static void CALLBACK titleEvent(HWINEVENTHOOK,DWORD,HWND hwnd,LONG object,LONG c
         lastTitle=GetTickCount64();PostMessageW(window,EventMsg,1,reinterpret_cast<LPARAM>(hwnd));
     }
 }
+static void CALLBACK editEvent(HWINEVENTHOOK,DWORD,HWND hwnd,LONG,LONG,DWORD,DWORD){
+    if(!hwnd||GetAncestor(hwnd,GA_ROOT)!=foregroundWindow)return;
+    const auto now=GetTickCount64();if(now-lastEditSignal<100)return;
+    lastEditSignal=now;PostMessageW(window,EditIntentMsg,0,0);
+}
+static void editIntent(){
+    if(!enabled||efficientOnly||sustainedExcluded(foregroundName))return;
+    environment();if(sample.blocked||sample.inputAge>400)return;
+    ++editorProbes;processMonitor.interact(foregroundPid,sample.now);setTimer();
+}
 static void setForeground(HWND hwnd,bool allowBurst) {
     if(!hwnd||hwnd!=GetForegroundWindow())return;
     DWORD pid=0;GetWindowThreadProcessId(hwnd,&pid);if(!pid)return;
@@ -158,18 +176,32 @@ static void setForeground(HWND hwnd,bool allowBurst) {
     if(pid!=foregroundPid) {
         if(foregroundProcess)CloseHandle(foregroundProcess);foregroundProcess=nullptr;
         if(titleHook)UnhookWinEvent(titleHook);titleHook=nullptr;
+        if(editValueHook)UnhookWinEvent(editValueHook);editValueHook=nullptr;
+        if(editCaptureHook)UnhookWinEvent(editCaptureHook);editCaptureHook=nullptr;
         foregroundPid=pid;previousForeground=0;sample.foreground=0;processMonitor.refreshSoon();
         foregroundProcess=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);
         foregroundName=foregroundProcess?processName(foregroundProcess):L"Protected application";
+        processMonitor.foreground(pid);
         browserForeground=browserName(foregroundName);
         if(browserForeground&&enabled&&!sample.blocked)
             titleHook=SetWinEventHook(EVENT_OBJECT_NAMECHANGE,EVENT_OBJECT_NAMECHANGE,nullptr,titleEvent,pid,0,WINEVENT_OUTOFCONTEXT|WINEVENT_SKIPOWNPROCESS);
+        if(!sustainedExcluded(foregroundName)&&enabled&&!sample.blocked){
+            editValueHook=SetWinEventHook(EVENT_OBJECT_VALUECHANGE,EVENT_OBJECT_VALUECHANGE,nullptr,editEvent,pid,0,WINEVENT_OUTOFCONTEXT|WINEVENT_SKIPOWNPROCESS);
+            editCaptureHook=SetWinEventHook(EVENT_SYSTEM_CAPTURESTART,EVENT_SYSTEM_CAPTUREEND,nullptr,editEvent,pid,0,WINEVENT_OUTOFCONTEXT|WINEVENT_SKIPOWNPROCESS);
+        }
     }
     bool excluded=pid==GetCurrentProcessId()||foregroundName==L"ghelper.exe"||foregroundName==L"parkcontrol.exe"||foregroundName==L"shellexperiencehost.exe";
     if(changed)schedulerEvent();
     if(allowBurst&&changed&&!excluded)requestBurst(Signal::Foreground);
 }
 static void registerInput(bool on) {
+    if(!on){
+        if(editValueHook)UnhookWinEvent(editValueHook);editValueHook=nullptr;
+        if(editCaptureHook)UnhookWinEvent(editCaptureHook);editCaptureHook=nullptr;
+    }else if(foregroundPid&&!sustainedExcluded(foregroundName)){
+        if(!editValueHook)editValueHook=SetWinEventHook(EVENT_OBJECT_VALUECHANGE,EVENT_OBJECT_VALUECHANGE,nullptr,editEvent,foregroundPid,0,WINEVENT_OUTOFCONTEXT|WINEVENT_SKIPOWNPROCESS);
+        if(!editCaptureHook)editCaptureHook=SetWinEventHook(EVENT_SYSTEM_CAPTURESTART,EVENT_SYSTEM_CAPTUREEND,nullptr,editEvent,foregroundPid,0,WINEVENT_OUTOFCONTEXT|WINEVENT_SKIPOWNPROCESS);
+    }
     if(on==keyboardRegistered)return;
     RAWINPUTDEVICE keyboard{0x01,0x06,static_cast<DWORD>(on?RIDEV_INPUTSINK:RIDEV_REMOVE),on?window:nullptr};
     if(RegisterRawInputDevices(&keyboard,1,sizeof(keyboard))) { keyboardRegistered=on;keyDown.fill(false); }
@@ -180,7 +212,8 @@ static void rawKeyboard(LPARAM lparam) {
     if(GetRawInputData(reinterpret_cast<HRAWINPUT>(lparam),RID_INPUT,&input,&size,sizeof(RAWINPUTHEADER))==UINT(-1)||input.header.dwType!=RIM_TYPEKEYBOARD)return;
     auto& key=input.data.keyboard;UINT v=key.VKey;if(v>=256)return;
     bool released=(key.Flags&RI_KEY_BREAK)!=0; bool repeat=keyDown[v];keyDown[v]=!released;
-    if(released||repeat||!browserForeground||!enabled||efficientOnly)return;
+    if(released||repeat||!enabled||efficientOnly)return;
+    if(!browserForeground){if(v==VK_LEFT||v==VK_RIGHT||v==VK_UP||v==VK_DOWN||v==VK_PRIOR||v==VK_NEXT)editIntent();return;}
     bool control=(GetAsyncKeyState(VK_CONTROL)&0x8000)!=0;
     bool alt=(GetAsyncKeyState(VK_MENU)&0x8000)!=0;
     if((control&&(v=='T'||v=='L'||v=='R'||v==VK_TAB))||v==VK_RETURN||v==VK_F5||(alt&&(v==VK_LEFT||v==VK_RIGHT))) {
@@ -244,6 +277,8 @@ static void turnOff(bool fromFailure) {
     enabled=false;armed=false;policy.burst=false;compute.reset();processMonitor.clear();schedulerEvent();
     if(foregroundHook)UnhookWinEvent(foregroundHook);foregroundHook=nullptr;
     if(titleHook)UnhookWinEvent(titleHook);titleHook=nullptr;
+    if(editValueHook)UnhookWinEvent(editValueHook);editValueHook=nullptr;
+    if(editCaptureHook)UnhookWinEvent(editCaptureHook);editCaptureHook=nullptr;
     registerInput(false);
     if(!dryRun) {
         DWORD e=power.restore();if(e){fault=L"Restoration needs attention: Windows "+std::to_wstring(e)+L". Recovery file retained.";logEvent(fault);}
@@ -255,7 +290,8 @@ static void turnOff(bool fromFailure) {
 static void setTimer() {
     if(!window)return;
     uint64_t burstInterval=policy.deadline>GetTickCount64()?std::clamp<uint64_t>(policy.deadline-GetTickCount64(),16,125):16;
-    uint64_t next=enabled?(sample.blocked?10000:policy.burst?burstInterval:(compute.active||compute.candidate||processMonitor.hasTools())?1000:sample.inputAge>15000?3000:1000):IsWindowVisible(window)?1000:0;
+    uint64_t demandInterval=processMonitor.interval(GetTickCount64());
+    uint64_t next=enabled?(sample.blocked?10000:policy.burst?std::min(burstInterval,demandInterval):demandInterval<1000?demandInterval:sample.inputAge>15000?3000:1000):IsWindowVisible(window)?1000:0;
     if(timerInterval==next)return;KillTimer(window,TickTimer);timerInterval=next;
     if(next)SetCoalescableTimer(window,TickTimer,static_cast<UINT>(next),nullptr,policy.burst?0:100);
 }
@@ -281,11 +317,11 @@ static void tick() {
         if(!sample.blocked)setForeground(GetForegroundWindow(),false);
         PowerState before=state();
         if(sample.blocked){compute.reset();processMonitor.clear();lastComputeSample=0;}
-        else if(!efficientOnly&&(!lastComputeSample||sample.now-lastComputeSample>=900)){
+        else if(!efficientOnly&&(!lastComputeSample||sample.now-lastComputeSample>=processMonitor.interval(sample.now))){
             processMonitor.collect(sample.now);lastComputeSample=sample.now;
-            compute.update(sample.now,processMonitor.cpu,sustainedExcluded(foregroundName)?0:sample.foreground,false);
+            compute.active=processMonitor.active;
         }
-        if(efficientOnly){compute.reset();if(policy.burst)policy.reset(sample.now);}
+        if(efficientOnly){compute.reset();processMonitor.clear();lastComputeSample=0;if(policy.burst)policy.reset(sample.now);}
         else policy.tick(sample);
         if(before!=state())applyState();
         if(enabled&&!dryRun&&sample.now-lastAudit>=10000) {
@@ -311,6 +347,13 @@ static std::wstring runtimeReport() {
         <<L"\nPower state: "<<(state()==PowerState::Burst?L"Burst":state()==PowerState::Compute?L"Compute":enabled?L"Efficiency":armed?L"Waiting for battery":L"Restored")
         <<L"\nCompute CPU percent of one core: "<<fixed(processMonitor.cpu)
         <<L"\nCompute process scans: "<<processMonitor.scans<<L"\nCompute process reads: "<<processMonitor.reads
+        <<L"\nTracked productive candidates: "<<processMonitor.tracked()
+        <<L"\nLightweight native discoveries: "<<processMonitor.nativeScans()
+        <<L"\nWorkload read failures: "<<processMonitor.failures
+        <<L"\nWorkload access failures: "<<processMonitor.accessFailures
+        <<L"\nWorkload capacity drops: "<<processMonitor.capacityDrops
+        <<L"\nWorkload wait failures: "<<processMonitor.waitFailures
+        <<L"\nEditor demand probes: "<<editorProbes
         <<L"\nControl policy: "<<(efficientOnly?L"Keep efficient":L"Automatic")
         <<L"\nBenchmark lease: "<<(benchmarkProcess?L"active":L"off")
         <<L"\nElapsed ms: "<<elapsed<<L"\nController CPU time ms: "<<fixed(cpuMs)
@@ -336,17 +379,17 @@ static void setLabel(size_t i,const std::wstring& text) {
     wchar_t old[1024];GetWindowTextW(labels[i],old,1024);if(text!=old)SetWindowTextW(labels[i],text.c_str());
 }
 static void updateTray() {
-    std::wstring tip=L"Pulse - ";tip+=!fault.empty()?L"Needs attention":!enabled?(armed?L"Waiting for battery":L"Paused"):compute.active&&!policy.burst?L"Sustained compute / Balanced":policy.burst?L"Short performance burst":L"Best efficiency / boost disabled";
+    std::wstring tip=L"Pulse - ";tip+=!fault.empty()?L"Needs attention":!enabled?(armed?L"Waiting for battery":L"Paused"):compute.active?L"Productive work / Best performance":policy.burst?L"Short performance burst":L"Best efficiency / boost disabled";
     if(tip==lastTrayTip)return;lastTrayTip=tip;
     wcsncpy_s(tray.szTip,tip.c_str(),_TRUNCATE);Shell_NotifyIconW(NIM_MODIFY,&tray);
 }
 static void updateUi() {
     if(labels.size()<15)return;
     setLabel(2,dryRun?L"OBSERVATION MODE":!fault.empty()?L"NEEDS ATTENTION":enabled?L"ADAPTIVE POWER COMPANION":armed?L"BATTERY CONTROL READY":L"CONTROL PAUSED");
-    setLabel(3,!fault.empty()?L"Control paused":!enabled?(armed?L"Ready for battery.":L"Your settings restored"):compute.active&&!policy.burst?L"Room to finish the job.":policy.burst?L"A little more momentum.":L"Quietly efficient.");
-    setLabel(4,!fault.empty()?fault:!enabled?(armed?L"Plugged-in control is off. Windows keeps your restored settings.":L"Resume when you want Pulse to manage responsiveness."):efficientOnly?L"Efficiency stays on until you choose Automatic.":compute.active&&!policy.burst?L"Sustained computation detected. Efficiency returns when CPU work settles.":policy.reason);
-    setLabel(5,!enabled?L"WINDOWS  /  restored":policy.burst?L"WINDOWS  /  best performance":compute.active?L"WINDOWS  /  balanced":L"WINDOWS  /  best power efficiency");
-    setLabel(6,!enabled?L"CPU BOOST  /  restored":policy.burst?L"CPU BOOST  /  aggressive":compute.active?L"CPU BOOST  /  efficient aggressive":L"CPU BOOST  /  disabled");
+    setLabel(3,!fault.empty()?L"Control paused":!enabled?(armed?L"Ready for battery.":L"Your settings restored"):compute.active?L"Room to finish the job.":policy.burst?L"A little more momentum.":L"Quietly efficient.");
+    setLabel(4,!fault.empty()?fault:!enabled?(armed?L"Plugged-in control is off. Windows keeps your restored settings.":L"Resume when you want Pulse to manage responsiveness."):efficientOnly?L"Efficiency stays on until you choose Automatic.":compute.active?L"Sustained computation detected. Efficiency returns when CPU work settles.":policy.reason);
+    setLabel(5,!enabled?L"WINDOWS  /  restored":state()==PowerState::Burst?L"WINDOWS  /  best performance":compute.active?L"WINDOWS  /  best performance":L"WINDOWS  /  best power efficiency");
+    setLabel(6,!enabled?L"CPU BOOST  /  restored":state()==PowerState::Burst?L"CPU BOOST  /  aggressive":compute.active?L"CPU BOOST  /  efficient aggressive":L"CPU BOOST  /  disabled");
     SYSTEM_POWER_STATUS s{};GetSystemPowerStatus(&s);
     setLabel(7,std::wstring(s.ACLineStatus==1?L"PLUGGED IN":L"ON BATTERY")+(s.BatteryLifePercent<=100?L"  ·  "+std::to_wstring(s.BatteryLifePercent)+L"%":L""));
     setLabel(12,L"Short boosts  "+std::to_wstring(bursts)+L"     ·     Burst limit  "+(sample.battery?L"1.8 seconds":L"2.4 seconds"));
@@ -455,7 +498,10 @@ static void powerEvent() {
 static LRESULT CALLBACK procedure(HWND h,UINT m,WPARAM w,LPARAM l) {
     if(m==taskbarCreated&&taskbarCreated) {Shell_NotifyIconW(NIM_ADD,&tray);return 0;}
     switch(m) {
-    case WM_CREATE:window=h;return 0;
+    case WM_CREATE:window=h;processMonitor.attach(h,ProductiveExitMsg);return 0;
+    case EditIntentMsg:editIntent();return 0;
+    case ProductiveExitMsg:
+        if(enabled&&!efficientOnly){environment();if(!sample.blocked){auto before=state();processMonitor.collect(sample.now,true);compute.active=processMonitor.active;lastComputeSample=sample.now;if(before!=state())applyState(L"Productive process exit");setTimer();}}return 0;
     case WM_GETOBJECT:++accessibilityRequests;break;
     case WM_ERASEBKGND:return 1;
     case WM_PAINT:paint();return 0;

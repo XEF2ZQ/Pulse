@@ -122,7 +122,7 @@ DWORD Power::configure() {
     return apply(false);
 }
 static DWORD boostFor(PowerState state){return state==PowerState::Burst?2:state==PowerState::Compute?4:0;}
-static GUID modeFor(PowerState state){return state==PowerState::Burst?GUID_POWER_MODE_BEST_PERFORMANCE:state==PowerState::Compute?BalancedMode:GUID_POWER_MODE_BEST_EFFICIENCY;}
+static GUID modeFor(PowerState state){return state==PowerState::Efficiency?GUID_POWER_MODE_BEST_EFFICIENCY:GUID_POWER_MODE_BEST_PERFORMANCE;}
 DWORD Power::apply(PowerState state) {
     if(!owned)return ERROR_INVALID_STATE;
     GUID current{}; DWORD e=activeScheme(current); if(e)return e; if(current!=saved.scheme)return ERROR_INVALID_STATE;

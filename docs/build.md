@@ -20,7 +20,8 @@ MSVC builds use C++20 and a static C/C++ runtime. The application and topology i
 
 | Test | Scope | Side effects |
 |---|---|---|
-| `power_policy` | Deterministic/randomized burst and sustained-compute decisions | No power API writes |
+| `productive_demand` | Current demand entry/exit, missing evidence, overlap, noise and native discovery parser | No power API writes |
+| `power_policy` | Deterministic/randomized burst and legacy sustained-compute decisions | No power API writes |
 | `scheduler_unit` | Synthetic topology buffers, parser boundaries, classification, cost guards, change budget | No live topology requirement or power writes |
 | `live_topology` | Actual Windows topology discovery | Read-only |
 | `scheduler_live` | Unit checks plus independent local OS topology cross-checks | Read-only |
@@ -30,7 +31,7 @@ Run all local checks with `ctest --test-dir build --output-on-failure`. The topo
 
 The GitHub workflow is configured to build Release on `windows-2025`, run the `unit` label and upload the executable plus CTest logs as an unsigned engineering artifact. At publication, the initial hosted run was blocked before any job steps started; hosted verification and its artifact remain pending. Hosted CI does not run benchmarks, apply power settings or establish compatibility with a physical laptop. The action versions are pinned to reviewed commit identifiers. Workflow permissions are limited to reading repository contents.
 
-## Package provenance
+## Historical 1.1.2 package provenance
 
 The published application's `src/` snapshot is preserved from the locally installed scheduler-preview source. Publication adds documentation, a standalone CMake project and a `--unit-only` path in the scheduler test executable; it does not change runtime policy or the installed desktop application.
 
@@ -41,6 +42,8 @@ The local installed executable's SHA-256 at publication preparation was:
 ```
 
 Different toolchains or build paths can produce a different PE hash. That installed hash is provenance for the recorded local revision, not an expected hash for all rebuilds. The resource version is `1.1.2-scheduler-preview`; the power diagnostics header retains its `Pulse 1.1` component label.
+
+The new patch resource version is `1.2.0-demand-preview`. Its hash is supplied with the local patch package; the historical hash above is not the new binary. `demand_probe` is a separate read-only, adaptive detector observer for opt-in live workload experiments. It does not apply power settings.
 
 ## Local power experiments
 

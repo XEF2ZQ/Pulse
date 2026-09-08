@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.0-demand-preview — 2026-09-08
+
+- Request Best performance + Efficient Aggressive for measured productive work, with priority over momentary UI bursts.
+- Add unknown process-tree demand alongside faster known-tool evidence, cached identities/handles, bounded process-exit waits and adaptive hot-target reads.
+- Add foreground edit-intent probes that require fresh CPU demand; avoid global high-rate mouse monitoring.
+- Add lightweight native identity discovery with defensive parsing and Toolhelp fallback.
+- Preserve battery-first ownership, source restoration, media exclusions and scheduler OFF default.
+- Add demand/parser tests and a read-only probe; record MSVC, unlisted Python compilation and isolated Darktable slider observations.
+- No battery-runtime improvement, universal classification or instantaneous hardware frequency transition is claimed.
+
+
 ## 1.1.2-scheduler-preview — 2026-09-07
 
 - Set the optional Scheduler guard to OFF by default, including absent-configuration behavior and the GUI label.

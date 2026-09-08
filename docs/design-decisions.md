@@ -14,7 +14,7 @@
 
 **Why:** foreground changes arrive cheaply but do not cover background compilation. CPU load alone also cannot distinguish a build from real-time media. Known executable candidates plus actual CPU consumption avoid boosting an idle benchmark menu; foreground exclusions protect common media/voice hosts.
 
-**Consequence:** the implementation is neither non-polling nor universal. Discovery and hysteresis introduce seconds of latency. Process-exit waits can improve known-job completion, but a process exit does not mean all child work has completed, and long-lived hosts can finish a job without exiting. Future event-assisted detection must account for both cases.
+**Consequence:** the implementation is neither non-polling nor universal. The 1.2 patch adds per-tree CPU evidence, coalesced process-exit waits and foreground edit probes. Discovery still introduces onset latency; quiet evidence is necessary for long-lived hosts. The [patch decision record](productive-demand-patch.md) documents the selected native discovery method, rejected sensor paths and measured limits.
 
 ## 003 — Battery-first ownership
 
