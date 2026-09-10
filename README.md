@@ -9,7 +9,7 @@ The implementation combines foreground intent, measured process-tree CPU demand,
 
 **Current publication: Pulse 1.2.0-demand-preview + PulseTailProbe 0.2.** Locally built and tested on one ASUS Ryzen AI 9 HX 370 laptop. Seven native suites and fifteen offline analysis tests passed. Hosted CI is configured; execution has been blocked by a GitHub account billing restriction before job steps start. Local verification is documented independently.
 
-**No battery-runtime gain is claimed.** Policy transitions, observer overhead and battery-reported recovery have been measured; paired runtime/energy-per-completed-work validation is still planned. The optional Scheduler guard is diagnostic and OFF by default. No SMU power-limit, undervolting, NPU or per-thread placement actuator is shipped.
+**No battery-runtime gain is claimed yet.** Policy transitions, observer overhead and battery-reported recovery have been measured; paired runtime/energy-per-completed-work validation is still planned. The optional Scheduler guard is diagnostic and OFF by default. No SMU power-limit, undervolting, NPU or per-thread placement actuator is shipped.
 
 ## Review the project
 
