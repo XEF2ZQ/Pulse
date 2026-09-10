@@ -2,13 +2,15 @@
 <h1 align="center">Pulse</h1>
 <p align="center"><strong>Adaptive Windows power policy, with bounded bursts and recoverable settings.</strong></p>
 <p align="center">C++20 · Native Win32 · Windows 11 x64 · Battery-first · G Helper companion</p>
-<p align="center"><a href="docs/validation.md">Local validation: 6/6 suites passed</a> · <a href="https://github.com/XEF2ZQ/Pulse/actions/workflows/windows.yml">Windows CI workflow</a></p>
+<p align="center"><a href="docs/validation.md">Local validation: 7/7 suites passed</a> · <a href="https://github.com/XEF2ZQ/Pulse/actions/workflows/windows.yml">Windows CI workflow</a></p>
 
 Pulse explores a practical systems problem: keep light work efficient while temporarily giving interactive requests and sustained productive work more CPU headroom. It changes supported Windows power settings through native APIs, then restores the settings it owned when control ends.
 
 **Current patch: 1.2.0-demand-preview.** The adaptive power controller is implemented and has been exercised on one ASUS Ryzen AI 9 HX 370 laptop. The optional scheduler guard is diagnostic groundwork, **off by default**; it does not place threads or alter their QoS. This is an experimental desktop utility, with measured limitations rather than a universal compatibility claim.
 
-**Build verification:** the local Release build and all six CTest suites passed. Hosted CI has not executed yet: the initial run was blocked before any job steps started. A hosted build artifact is therefore not yet available.
+**Build verification:** the local Release build and all seven CTest suites passed, including the independent battery diagnostic parser. Hosted CI has not executed yet: the initial run was blocked before any job steps started. A hosted build artifact is therefore not yet available.
+
+**Diagnostic patch:** [battery discharge recovery investigation](docs/power-tail-investigation.md) adds an opt-in recorder and measured recovery results. It makes no resident governor changes. Component-power comparison remains pending live HWiNFO data.
 
 ## Behavior at a glance
 

@@ -1,6 +1,7 @@
 /build*/
 /out/
 /dist/
+**/TailCaptures/
 /.vs/
 /.idea/
 **/__pycache__/

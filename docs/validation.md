@@ -2,6 +2,8 @@
 
 For the current **1.2.0-demand-preview**, see [productive-demand patch validation](productive-demand-patch.md). Results below are the historical 1.0–1.1.2 baseline, not new-release claims.
 
+The separate [battery-tail diagnostic patch](power-tail-investigation.md) passed seven local native suites plus five offline analysis tests. It adds an opt-in recorder without changing the installed governor. Live component-power validation remains pending.
+
 This report separates tested policy behavior, local integration observations and work still needed. Dates refer to local tests performed September 5–8, 2026. Historical measurements are retained with their original version scope. Personal machine logs, configuration files and benchmark exports are not published.
 
 ## Test platform

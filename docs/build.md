@@ -20,6 +20,7 @@ MSVC builds use C++20 and a static C/C++ runtime. The application and topology i
 
 | Test | Scope | Side effects |
 |---|---|---|
+| `tail_telemetry` | Battery units/sentinels and bounded HWiNFO wire parsing | Synthetic data only; no power writes |
 | `productive_demand` | Current demand entry/exit, missing evidence, overlap, noise and native discovery parser | No power API writes |
 | `power_policy` | Deterministic/randomized burst and legacy sustained-compute decisions | No power API writes |
 | `scheduler_unit` | Synthetic topology buffers, parser boundaries, classification, cost guards, change budget | No live topology requirement or power writes |
@@ -47,4 +48,6 @@ The new patch resource version is `1.2.0-demand-preview`. Its hash is supplied w
 
 ## Local power experiments
 
-Launching the normal controller, using AC opt-in, or calling `--exercise` changes live system power policy. These are deliberately outside default CI. Use a controlled test machine, preserve the journal and integration backups, compare before/after settings, and verify restoration before interpreting results. [Validation](validation.md) records the existing local experiments; [benchmark plan](benchmark-plan.md) describes the future runtime harness.
+`PulseTailProbe.exe` is a separate recorder built by CMake. Its optional `--exercise` creates a bounded CPU workload but does not write power settings; the running Pulse controller can respond to that workload. See [recorder documentation](../tools/TAIL_PROBE.md) and [September 9 investigation](power-tail-investigation.md). It is not launched by Pulse.
+
+Launching the normal controller, using AC opt-in, or calling `Pulse.exe --exercise` changes live system power policy. These are deliberately outside default CI. Use a controlled test machine, preserve the journal and integration backups, compare before/after settings, and verify restoration before interpreting results. [Validation](validation.md) records the existing local experiments; [benchmark plan](benchmark-plan.md) describes the future runtime harness.
