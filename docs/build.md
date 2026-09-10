@@ -30,7 +30,13 @@ MSVC builds use C++20 and a static C/C++ runtime. The application and topology i
 
 Run all local checks with `ctest --test-dir build --output-on-failure`. The topology integration checks may reject incomplete virtual-machine topology; their purpose is to validate the actual target, not to assume every host exposes sufficient data.
 
-The GitHub workflow is configured to build Release on `windows-2025`, run the `unit` label and upload the executable plus CTest logs as an unsigned engineering artifact. At publication, the initial hosted run was blocked before any job steps started; hosted verification and its artifact remain pending. Hosted CI does not run benchmarks, apply power settings or establish compatibility with a physical laptop. The action versions are pinned to reviewed commit identifiers. Workflow permissions are limited to reading repository contents.
+Run the fifteen hardware-independent Python checks with `python -m unittest discover -s tools -p "test_*.py"` (Python 3.10+). Run `python tools/verify_published_evidence.py` to reproduce both checked-in battery summaries without modifying them. These use only the standard library. Matplotlib is optional for plot regeneration and is not part of the resident application.
+
+The GitHub workflow builds Release on `windows-2025`, runs the native `unit` label, fifteen offline Python tests and published-summary reproduction, then uploads both executables and CTest logs as an unsigned engineering artifact. Hosted execution has been blocked before job steps start by an account-level billing restriction; it has not validated this release. The preview release supplies a separately identified local build. Hosted CI does not run benchmarks, apply power settings or establish physical-laptop compatibility. Action versions are pinned to reviewed commit identifiers; workflow permissions are limited to reading repository contents.
+
+## September 10 publication verification
+
+The publication worktree rebuilt with MSVC 19.51.36248.0 and SDK 10.0.26100.0. All seven native CTest suites, fifteen offline Python tests and both sanitized-trace reproductions passed. The release includes hashes for the locally built Pulse 1.2 controller and PulseTailProbe 0.2, plus a source revision identifier. This publication does not change controller behavior beyond the previously validated 1.2 demand patch, and does not enable hardware-limit writes.
 
 ## Historical 1.1.2 package provenance
 

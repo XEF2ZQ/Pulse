@@ -33,13 +33,13 @@ The installed Pulse controller remained active on battery on the ASUS GA605WI / 
 
 The raw battery rate changed every approximately 1–1.5 seconds. It was not simply frozen for the full recovery interval. Both runs had a similar smooth decay despite different workload sizes. Battery voltage also recovered much sooner: in the four-worker capture it had rebounded to 16.138 V about 1.5 seconds after completion, while the rate was at its reported peak. Together these observations support an averaging/filtering hypothesis. Voltage is not an independent power measurement, and device activity, fan power, thermal effects and background work remain possible contributors.
 
-Raw captures and figures are retained with the local diagnostic package, outside the source repository. No battery-life improvement, saved joules or macOS comparison is claimed. The recorded logger CPU time excludes the intentionally busy worker threads and does not count all kernel/firmware or HWiNFO overhead. Sampling twice per second is an opt-in diagnostic cost, not a new resident Pulse behavior.
+[Sanitized captures and figures](evidence/README.md) are published with reproducible analysis; original private captures remain local. No battery-life improvement, saved joules or macOS comparison is claimed. The recorded logger CPU time excludes the intentionally busy worker threads and does not count all kernel/firmware or HWiNFO overhead. Sampling twice per second is an opt-in diagnostic cost, not a new resident Pulse behavior.
 
 ## Missing evidence
 
-HWiNFO's shared mapping returned Windows error 2 (not found), including a final inventory check. No shared sensor frames were collected, so **these captures contain no CPU-package watts, GPU watts, fan speeds or residency measurements**. The user's earlier package-power observation remains an observation, not a measurement performed by this recorder.
+HWiNFO's shared mapping returned Windows error 2 (not found), including a final inventory check. No shared sensor frames were collected, so **these captures contain no CPU-package watts, GPU watts, fan speeds or residency measurements**. An earlier manual package-power observation was not independently recorded by this acquisition tool.
 
-The user enabled shared support, but the live Sensors window could not be verified because the native app-access request timed out while the user was away. The recorder must be restarted once HWiNFO is publishing. Synthetic parser tests do not replace this live check.
+Shared sensor publication was not established during these experiments. Restart the recorder once HWiNFO is publishing and validate the actual catalog before component acquisition. Synthetic parser tests do not replace this live check.
 
 These were short CPU-only experiments with the normal desktop background workload present. Screen brightness, panel power state, device states and fan speed were not instrumented. Darktable rotation/perspective recovery has not been remeasured with component telemetry. No independent instantaneous battery current meter was available. An application-only test cannot resolve every whole-platform energy source.
 

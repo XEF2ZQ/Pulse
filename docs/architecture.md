@@ -90,6 +90,22 @@ The baseline scheduling-policy values are distinct from the optional Scheduler g
 - `src/scheduler_topology.*`: variable-record parsing and read-only topology discovery.
 - `src/scheduler_policy.h`: optional diagnostics, conservative cost predicate, preference persistence; no placement actuator.
 
-## Privacy
+## Independent diagnostics
 
-The controller has no network or telemetry client. It observes process identity, CPU time, foreground transitions and selected navigation key signals. Its decision records do not include typed text, window titles, URLs or audio. Diagnostics may contain machine configuration and local context; users should review reports before sharing them. No personal runtime reports are included in this repository.
+`PulseTailProbe` is a separate executable, not part of the controller's loop. It acquires reported battery values through read-only query IOCTLs and optionally reads an already-running HWiNFO shared-memory producer. Acquisition errors and sample ages remain explicit. The offline Python analysis has no power-setting authority.
+
+```mermaid
+flowchart LR
+    Battery[Battery driver reported status] --> Probe[Opt-in PulseTailProbe]
+    Shared[Existing HWiNFO shared data] --> Probe
+    Readback[Windows boost and mode readback] --> Probe
+    Probe --> Capture[Local capture and error records]
+    Capture --> Analysis[Offline recovery and component analysis]
+    Analysis --> Evidence[Measured result or insufficient evidence]
+```
+
+The main application does not consume battery discharge as a control signal and does not ingest package watts. Hardware telemetry is investigative evidence. See [recorder boundaries](../tools/TAIL_PROBE.md) and [evidence validity](evidence/README.md).
+
+## Privacy and published evidence
+
+The controller has no network or telemetry client. It observes process identity, CPU time, foreground transitions and selected navigation key signals. Its decision records do not include typed text, window titles, URLs or audio. Diagnostics may contain machine configuration and local context; users should review reports before sharing them. Published evidence contains selected relative-time numeric columns; original personal runtime reports and configurations are excluded. The [evidence index](evidence/README.md) documents what was retained and removed.

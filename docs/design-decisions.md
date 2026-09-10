@@ -45,3 +45,27 @@ Microsoft documents the Surface Laptop Studio 2's Movidius VPU and Studio Effect
 **Decision:** separate policy tests, observed machine behavior, controller overhead, user impressions and future battery-runtime claims.
 
 **Consequence:** assertion counts are not scenario counts; short CPU-time samples are not energy measurements; successful Windows readback is not a measured hardware clock change. The next milestone is a repeatable mixed-workload experiment, with completed work and responsiveness recorded alongside discharge.
+
+## 007 — Separate diagnosis from resident control
+
+**Decision:** keep battery/shared-sensor acquisition in a standalone opt-in executable and analyze captures offline.
+
+**Why:** the battery recovery question needs more observability than the runtime classifier, but continuous sensor acquisition could change idle behavior and add firmware/driver overhead. Existing HWiNFO shared readings avoid a second hardware scanner.
+
+**Consequence:** no constant recorder overhead is added to Pulse. Data remains explicitly missing when the producer is unavailable. Valid units and successful parsing do not establish sensor meaning or freshness. [Acquisition boundaries](../tools/TAIL_PROBE.md).
+
+## 008 — Do not infer physical power from a delayed reported rate
+
+**Decision:** report the measured battery curve as received; do not deconvolve or relabel it as instantaneous power.
+
+**Why:** two traces showed prompt policy release and a much slower reported-rate decay, but lacked component watts. Similar exponential fits support a hypothesis without identifying the gauge, SMU or device responsible.
+
+**Consequence:** the investigation remains open at the component level. Sanitized numerical evidence and reproducible analysis are published so this uncertainty can be independently assessed. [Evidence index](evidence/README.md).
+
+## 009 — Dynamic hardware ceilings need an owner and an observed benefit
+
+**Decision:** defer automatic 12/35 W SMU writes; implement component-evidence validation first.
+
+**Why:** a 12 W ceiling does not directly constrain an already 5 W component. The reviewed G Helper source does not expose the external lease needed to coordinate temporary limits. A second independent writer risks competing settings; acknowledgement alone also does not prove enforcement.
+
+**Consequence:** no hardware-limit button is presented as an active feature. A future actuator must serialize state changes, verify capabilities and effect, recover partial writes, and restore/relinquish ownership on faults and source transitions. [Detailed evaluation](smu-cap-evaluation.md).

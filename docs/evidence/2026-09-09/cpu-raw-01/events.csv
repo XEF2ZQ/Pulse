@@ -1,0 +1,5 @@
+elapsed_s,event
+0,capture_start
+30.014306,load_start
+38.010183,load_joined
+100.005366,capture_end

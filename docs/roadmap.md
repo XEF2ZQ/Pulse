@@ -4,6 +4,8 @@ These are remaining validation and development goals. The 1.2 patch implements s
 
 | Milestone | Proposed work | Evidence needed before claiming completion |
 |---|---|---|
+| Component-power attribution | Compare fresh package/GPU/fan readings with workload completion and battery-reported rate | Live producer validation, matched polling/source conditions, component identity and sufficient recovery coverage |
+| Coordinated hardware ceiling experiment | Evaluate a temporary 12/35 W ceiling only after a measured need | One participating hardware owner, real limit/effect readback, partial-failure handling, restore tests and net energy/latency evidence |
 | Repeatable everyday + development experiment | Versioned mixed-workload harness, paired Automatic/Paused battery runs | Reproducible inputs, equal completed work, latency/quality measures and full result distribution |
 | Faster productive-work lifecycle detection | Process-start/exit assistance and bounded job leases alongside adaptive sampling | Measure onset/exit percentiles, child-process races, persistent hosts, cancellation, access denial and total observer overhead |
 | Open-set productive-work recognition | Behavioral evidence for unknown build/render/export/simulation work; preserve specific fast paths | Held-out unseen applications, background process trees, mixed media + build cases and false-positive/false-negative analysis |

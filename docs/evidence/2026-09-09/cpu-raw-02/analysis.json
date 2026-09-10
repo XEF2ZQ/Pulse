@@ -1,0 +1,22 @@
+{
+  "capture": "cpu-raw-02",
+  "samples": 200,
+  "battery_errors": 0,
+  "source_changed": false,
+  "load_start_s": 30.004454,
+  "load_end_s": 38.009067,
+  "baseline_median_w": 6.1,
+  "settled_median_w": 6.9735,
+  "observed_peak_w": 13.753,
+  "post_work_peak_delay_s": 1.508790999999995,
+  "boost_disabled_after_end_s": 0.9953439999999958,
+  "cpu_below_5pct_after_end_s": 0.5053440000000009,
+  "reported_discharge_below_10w_s": 12.507384000000002,
+  "reported_discharge_below_8w_s": 28.504824999999997,
+  "raw_rate_change_interval_median_s": 1.0088819999999998,
+  "descriptive_decay_tau_s": 13.29191480314402,
+  "log_decay_r_squared": 0.9870460775644055,
+  "query_median_ms": 1.7926,
+  "hwinfo_available": false,
+  "interpretation": "Battery rate is reported telemetry, not an independent instantaneous whole-system power measurement. A decay fit cannot distinguish filtering from a physical tail by itself."
+}

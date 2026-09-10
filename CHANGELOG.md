@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2 publication and PulseTailProbe 0.2 — 2026-09-10
+
+- Publish the 1.2 productive-demand controller with its existing local validation scope.
+- Add independent native battery/HWiNFO acquisition and offline component-recovery comparison; keep both outside the resident controller.
+- Reject absent required sensors at acquisition startup and stale/gapped component evidence during analysis.
+- Publish two sanitized battery-rate traces, reproducible summaries, figures and their limitations.
+- Add engineering case study, failure-handling matrix, evidence index and decisions on observability and deferred hardware limits.
+- Extend Windows CI with fifteen offline analysis tests and the standalone recorder artifact; hosted execution remains subject to the account restriction documented in build/validation.
+- Retain All rights reserved terms and explicit AI-assisted provenance. No new SMU, scheduler or NPU actuator and no battery-runtime gain are claimed.
+
 ## 1.2.0-demand-preview — 2026-09-08
 
 - Request Best performance + Efficient Aggressive for measured productive work, with priority over momentary UI bursts.

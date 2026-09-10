@@ -20,9 +20,9 @@ Sources: [RyzenAdj issue 412](https://github.com/FlyGoat/RyzenAdj/issues/412), [
 
 The distinction is causal: an averaged power *budget* can influence future performance while work is runnable. That does not mean historical high consumption must continue after the work stops. Similarly, modifying a budget does not erase history from an independent reported battery-rate signal. If real component power is already back at baseline, changing the displayed tail is not an energy-saving result.
 
-### Additional pasted exchange
+### Unsupported premises checked during review
 
-The follow-up text assumes an SMU limit patch was already applied successfully. That premise is false for Pulse: no such patch was installed or exercised. It also describes SMU telemetry as Pulse's current classification input; Pulse actually uses activity events and sampled CPU-time evidence. Package power was unavailable in our previous captures. Do not label it “confirmed fast” in a diagnostic output based on that exchange.
+A supplementary hypothesis assumed an SMU limit patch was already applied successfully. That premise is false for Pulse: no such patch was installed or exercised. It also describes SMU telemetry as Pulse's current classification input; Pulse actually uses activity events and sampled CPU-time evidence. Package power was unavailable in our previous captures. Do not label it “confirmed fast” in a diagnostic output based on that hypothesis.
 
 The recommendation to separate battery reporting from actual consumption is useful, but the conclusion that all remaining delay is confirmed EC filtering is unsupported. Other platform components can consume power after CPU work stops. Windows's battery interface exposes firmware-reported data without proving the exact internal filtering location or algorithm on this ASUS. There is no demonstrated supported Pulse setting that resets that reporting history.
 
@@ -53,7 +53,7 @@ python .\component_tail.py .\component-run --sensor SENSOR_ID INSTANCE READING_I
 
 Replace the three identity placeholders with the catalog's numbers. A limit sensor also has units W, so human verification of sensor meaning remains necessary. The analyzer does not infer physical meaning from a name, sum overlapping CPU/GPU domains, or treat missing data as zero power. Producer timestamps have whole-second precision; results are sample-resolution observations, not hard real-time bounds.
 
-Release build and seven native test suites passed. Ten new offline component-comparison tests passed, alongside five existing recovery-analysis tests. The new tests use synthetic telemetry and do not establish real hardware timing. Live component validation remains outstanding: the latest inventory returned shared-mapping error 2. HWiNFO's System Summary was visible, but automated clicks did not open the live Sensors table; user assistance was requested.
+Release build and seven native test suites passed. Ten new offline component-comparison tests passed, alongside five existing recovery-analysis tests. The new tests use synthetic telemetry and do not establish real hardware timing. Live component validation remains outstanding: the latest inventory returned shared-mapping error 2. The live sensor producer was not available for the component experiment. No live component-power result is claimed.
 
 ## Requirements before implementing the hardware actuator
 

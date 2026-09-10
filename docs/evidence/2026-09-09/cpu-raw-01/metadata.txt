@@ -1,0 +1,13 @@
+PulseTailProbe 0.1 (sanitized metadata)
+interval_ms=500
+seconds=100
+exercise_workers=4
+battery_open_error=0
+battery_read_error=0
+hwinfo_error=2
+hwinfo_period_ms=0
+samples=200
+raw_rate_changes=79
+hwinfo_frames=0
+logger_thread_cpu_ms=15.625
+private_mib=1.46094
