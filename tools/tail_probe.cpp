@@ -181,8 +181,9 @@ int wmain(int argc, wchar_t **argv) {
         bool previousTimesValid = GetSystemTimes(&idle, &kernel, &user) != FALSE;
         uint64_t previousTotal = ticks(kernel) + ticks(user), previousIdle = ticks(idle);
         std::atomic<bool> loadStop = false;
-        std::vector<std::jthread> jobs;
         std::atomic<uint64_t> checksum = 0;
+        // Workers must join before either referenced atomic is destroyed on exceptions.
+        std::vector<std::jthread> jobs;
         const double start = seconds();
         const uint64_t cpuStart = threadCpu();
         double next = start, lastRateAt = start;
