@@ -12,6 +12,8 @@ Pulse explores a practical systems problem: keep light work efficient while temp
 
 **Diagnostic patch:** [battery discharge recovery investigation](docs/power-tail-investigation.md) adds an opt-in recorder and measured recovery results. It makes no resident governor changes. Component-power comparison remains pending live HWiNFO data.
 
+The [12/35 W SMU proposal evaluation](docs/smu-cap-evaluation.md) adds component-recovery comparison and a required-sensor capture option in PulseTailProbe 0.2. Automatic hardware limit writes remain deferred pending measurements and coordinated ownership with G Helper.
+
 ## Behavior at a glance
 
 | Situation | Windows power mode | CPU boost policy |

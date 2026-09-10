@@ -1,4 +1,4 @@
-# PulseTailProbe 0.1
+# PulseTailProbe 0.2
 
 An independent Windows x64 diagnostic executable for comparing workload completion, CPU-policy release and battery-reported discharge. It is not a resident service and does not change power settings. Pulse does not launch it or link its telemetry code.
 
@@ -17,6 +17,8 @@ From PowerShell in the executable's folder:
 Use a new output directory for each command. `--inventory` only records availability and sensor identities. The exercise intentionally consumes CPU: 30 seconds of baseline followed by eight seconds on 1–8 workers, then recovery. It starts only on battery with known charge of at least 15% and Energy Saver off; source/charge changes end the synthetic load at the next sample. Other applications are not stopped. Without `--exercise`, no synthetic load runs. Ctrl+C stops a capture.
 
 Options: `--seconds` 1–1800 (at least 60 with exercise); `--period-ms` 250–5000, default 500; `--exercise` 1–8; `--inventory`; `--help`. Short polling intervals have an observer cost and do not make firmware readings instantaneous. Keep 500 ms for comparable measurements. No high-resolution timer request is made.
+
+Use `--require-hwinfo` to fail at startup if shared sensor readings are absent; it prevents the synthetic load from starting in that case. Continued freshness and coverage must still be checked after capture. [Component comparison and power-limit evaluation](../docs/smu-cap-evaluation.md) documents the new offline `component_tail.py` analyzer. Its ten tests run with `python test_component_tail.py`.
 
 ## Files
 

@@ -87,7 +87,7 @@ int wmain(int argc, wchar_t **argv) {
         std::filesystem::path output =
             std::filesystem::path(executable).parent_path() / L"TailCaptures" / runName;
         unsigned duration = 90, period = 500, workers = 0;
-        bool inventory = false;
+        bool inventory = false, requireHwinfo = false;
         for (int i = 1; i < argc; ++i) {
             std::wstring arg = argv[i];
             auto next = [&]() -> std::wstring {
@@ -105,10 +105,12 @@ int wmain(int argc, wchar_t **argv) {
                 workers = number(next());
             else if (arg == L"--inventory")
                 inventory = true;
+            else if (arg == L"--require-hwinfo")
+                requireHwinfo = true;
             else if (arg == L"--help") {
                 std::cout
                     << "PulseTailProbe --out folder [--seconds 90] [--period-ms 500] [--exercise "
-                       "1..8] [--inventory]\nRead-only telemetry. Optional exercise: 8 seconds of "
+                       "1..8] [--inventory] [--require-hwinfo]\nRead-only telemetry. Optional exercise: 8 seconds of "
                        "CPU work after 30 seconds idle. No power writes.\n";
                 return 0;
             } else
@@ -130,7 +132,7 @@ int wmain(int argc, wchar_t **argv) {
         const auto first = battery.read();
         std::ofstream meta(output / L"metadata.txt");
         meta.exceptions(std::ios::failbit | std::ios::badbit);
-        meta << "PulseTailProbe 0.1\ninterval_ms=" << period << "\nseconds=" << duration
+        meta << "PulseTailProbe 0.2\ninterval_ms=" << period << "\nseconds=" << duration
              << "\nexercise_workers=" << workers << "\nbattery_open_error=" << battery.openError
              << "\nbattery_read_error=" << first.error << "\nhwinfo_error=" << hwinfo.error
              << "\nhwinfo_period_ms=" << sensors.periodMs << "\n";
@@ -145,6 +147,8 @@ int wmain(int argc, wchar_t **argv) {
                     << quoted(v.sensor) << ',' << quoted(v.label) << ',' << quoted(v.unit) << ','
                     << v.value << '\n';
         catalog.close();
+        if (requireHwinfo && (!shared || sensors.values.empty()))
+            throw std::runtime_error("Required HWiNFO readings unavailable; no workload started");
         if (inventory) {
             meta.close();
             return first.error ? 2 : 0;
