@@ -4,7 +4,7 @@ This is an experimental source publication for review. There is no general reuse
 
 ## Start with observation
 
-Keep the executable in a writable per-user folder. Pulse stores its INI, restoration journal and optional diagnostics alongside it. It uses native power APIs at normal user privilege; access or platform capability failures should be investigated, not bypassed by routinely running it as administrator.
+Keep the executable in a writable per-user folder. Pulse stores its INI, CPU-power restoration journal and optional diagnostics alongside it. CPU power control uses native APIs at normal user privilege. The optional [Efficiency options](efficiency-options.md) use a separate elevated helper and protected machine-registry recovery records; do not routinely run the whole GUI as administrator.
 
 ```powershell
 # Open the controls without activating the controller.
@@ -17,7 +17,7 @@ Keep the executable in a writable per-user folder. Pulse stores its INI, restora
 .\Pulse.exe --hidden
 ```
 
-Run only one controller instance. Close the window to leave Pulse in the tray. Use Pause to stop controlling and restore owned values, or Exit to restore and terminate. A hidden window is the intended low-overhead operating state.
+Run only one controller instance. Close the window to leave Pulse in the tray. Pause restores CPU power settings; independently selected efficiency options remain active. Restore & exit requests restoration of both CPU settings and efficiency options. A hidden window is the intended low-overhead operating state.
 
 ## Controls
 
@@ -25,7 +25,8 @@ Run only one controller instance. Close the window to leave Pulse in the tray. U
 |---|---|
 | Automatic | Arm burst and sustained-compute policies on eligible power sources |
 | Keep efficient | Keep eligible operation in Efficiency; suppress automatic bursts/Compute |
-| Pause | Stop control and restore owned settings |
+| Pause | Stop CPU power control and restore its owned settings; efficiency options are separate |
+| Efficiency options | Two independent administrative requests with remembered selections, OFF by default; see [behavior, one-time broker setup and recovery](efficiency-options.md) |
 | Boost now | Request a short bounded performance burst; eligibility and policy limits still apply |
 | Plugged-in control | Persist AC opt-in; OFF by default |
 | Scheduler guard | Persist diagnostic topology/classification opt-in; OFF by default; no thread-placement changes |

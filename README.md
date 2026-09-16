@@ -7,7 +7,9 @@ Pulse temporarily gives interactive requests and productive CPU work more perfor
 
 The implementation combines foreground intent, measured process-tree CPU demand, bounded process-exit notifications and a source-specific recovery journal. It uses Windows policy APIs and leaves hardware tuning to G Helper/OEM firmware.
 
-**Current publication: Pulse 1.2.0-demand-preview + PulseTailProbe 0.2.** Locally built and tested on one ASUS Ryzen AI 9 HX 370 laptop. Seven native suites and fifteen offline analysis tests passed. Hosted CI is configured; execution has been blocked by a GitHub account billing restriction before job steps start. Local verification is documented independently.
+**Current publication: Pulse 1.3.0-efficiency-preview + PulseTailProbe 0.2.** Locally built and tested on one ASUS Ryzen AI 9 HX 370 laptop. Eight native suites and fifteen offline analysis tests passed. Hosted CI is configured; earlier execution was blocked by a GitHub account restriction. Local verification is documented independently.
+
+**New: [Efficiency options](docs/efficiency-options.md).** An opt-in dropdown provides remembered Windows Update service and Defender real-time preference controls, with an optional installed administrator broker, event notifications, automatic correction/backoff, verified status and recovery records. Both default OFF. Update correction, restoration and no-prompt broker transport passed local tests. Defender's live setter is unverified and respects Tamper Protection; these controls are not unbypassable. No battery benefit from them is claimed.
 
 **No battery-runtime gain is claimed yet.** Policy transitions, observer overhead and battery-reported recovery have been measured; paired runtime/energy-per-completed-work validation is still planned. The optional Scheduler guard is diagnostic and OFF by default. No SMU power-limit, undervolting, NPU or per-thread placement actuator is shipped.
 

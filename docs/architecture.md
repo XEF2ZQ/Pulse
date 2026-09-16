@@ -1,5 +1,7 @@
 # Architecture
 
+The 1.3 [Efficiency options subsystem](efficiency-options.md) adds independent Update/Defender preference controls with an optional administrator broker. The CPU power-controller architecture below remains unchanged; the new subsystem has its own ownership, event subscriptions, persistence and recovery journal.
+
 ## Responsibility and scope
 
 Pulse is a per-user Win32 process with a tray UI and a second instance of its executable acting as a waiting recovery companion. It requests Windows policy changes; it does not implement a CPU scheduler, frequency governor or hardware power-limit driver. The 1.2 demand preview extends the 1.1.2 publication snapshot. The scheduler guard remains diagnostic and OFF by default.

@@ -2,6 +2,7 @@
 #include "policy.h"
 #include "productive_monitor.h"
 #include "scheduler_policy.h"
+#include "efficiency.h"
 #include <dbt.h>
 #include <windowsx.h>
 #include <objbase.h>
@@ -28,7 +29,8 @@ constexpr UINT ProductiveExitMsg=WM_APP+8, EditIntentMsg=WM_APP+9;
 constexpr UINT TrayMsg=WM_APP+1, QuitMsg=WM_APP+2, ReportMsg=WM_APP+3, EventMsg=WM_APP+4;
 constexpr UINT BenchmarkMsg=WM_APP+5, ModeMsg=WM_APP+6, SchedulerRefreshMsg=WM_APP+7;
 constexpr UINT TickTimer=1, StopTimer=2, CheckTimer=3;
-constexpr int AutoButton=101, EcoButton=102, PauseButton=103, BoostButton=104, ReportButton=105, HelperButton=106, ExitButton=107, AcButton=108, SchedulerButton=109;
+constexpr int AutoButton=101, EcoButton=102, PauseButton=103, BoostButton=104, ReportButton=105, HelperButton=106, ExitButton=107, AcButton=108, SchedulerButton=109, EfficiencyButton=110;
+static efficiency::Client efficiencyOptions;
 static HWND window=nullptr;
 static Power power;
 static Policy policy;
@@ -373,6 +375,7 @@ static std::wstring runtimeReport() {
         for(uint64_t i=traceCount>traces.size()?traceCount-traces.size():0;i<traceCount;++i){const auto& t=traces[i%traces.size()];
             out<<i<<L","<<fixed(t.begin,4)<<L","<<fixed(t.end,4)<<L","<<t.source<<L","<<t.burst<<L","<<t.accepted<<L","<<t.error<<L"\n";}
     }
+    out<<efficiencyOptions.report();
     return out.str();
 }
 static void setLabel(size_t i,const std::wstring& text) {
@@ -395,6 +398,10 @@ static void updateUi() {
     setLabel(12,L"Short boosts  "+std::to_wstring(bursts)+L"     ·     Burst limit  "+(sample.battery?L"1.8 seconds":L"2.4 seconds"));
     setLabel(13,schedulerGuard.status());
     setLabel(14,L"G Helper keeps fans, GPU, charge limit and hardware power limits.\nClose this window to keep Pulse in the system tray.");
+    if(labels.size()>17){
+        setLabel(16,L"Update control: "+efficiencyOptions.status(efficiency::Option::Update));
+        setLabel(17,L"Real-time control: "+efficiencyOptions.status(efficiency::Option::Realtime));
+    }
     setLabel(11,manageAC?L"15%  active cores\n80%  minimum processor state":L"Off by default\nYour plugged-in settings stay in control");
     const wchar_t* acTitle=manageAC?L"Plugged-in control: ON":L"Plugged-in control: OFF";
     wchar_t acOld[64];GetWindowTextW(GetDlgItem(window,AcButton),acOld,64);
@@ -435,8 +442,11 @@ static void makeUi() {
     label(L"15%  active cores\n80%  minimum processor state",428,435,310,60,bold); // 11
     label(L"",42,587,690,24,regular); // 12
     label(L"",42,616,710,24,fontSmall); // 13
-    label(L"",32,716,740,43,fontSmall); // 14
+    label(L"",32,778,740,43,fontSmall); // 14
     label(L"Standard parking · Automatic long and short threads",42,552,690,26,fontSmall); // 15
+    label(L"",32,716,740,24,fontSmall); // 16
+    label(L"",32,745,740,24,fontSmall); // 17
+    button(EfficiencyButton,L"Efficiency options \u25BE",555,80,217,30);
     button(SchedulerButton,L"Scheduler guard: OFF",32,510,362,36);
     button(AcButton,L"Plugged-in control: OFF",428,510,344,36);
     button(AutoButton,L"Automatic",32,334,220,42);button(EcoButton,L"Keep efficient",269,334,220,42);button(PauseButton,L"Pause & restore",506,334,266,42);
@@ -472,10 +482,34 @@ static void trayMenu() {
     POINT pt;GetCursorPos(&pt);SetForegroundWindow(window);int id=TrackPopupMenu(m,TPM_RETURNCMD|TPM_NONOTIFY,pt.x,pt.y,0,window,nullptr);DestroyMenu(m);PostMessageW(window,WM_NULL,0,0);
     if(id==1)showWindow();else if(id==2)SendMessageW(window,WM_COMMAND,AutoButton,0);else if(id==3)SendMessageW(window,WM_COMMAND,EcoButton,0);else if(id==4)SendMessageW(window,WM_COMMAND,PauseButton,0);else if(id==5)SendMessageW(window,QuitMsg,0,0);
 }
+static void efficiencyMenu() {
+    HMENU menu=CreatePopupMenu();if(!menu)return;
+    AppendMenuW(menu,MF_STRING|MF_DISABLED,0,L"Selections remembered · applies on battery and AC");
+    AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
+    AppendMenuW(menu,MF_STRING|(efficiencyOptions.selected(efficiency::Option::Update)?MF_CHECKED:0),1,L"Keep Windows Update service off");
+    AppendMenuW(menu,MF_STRING|(efficiencyOptions.selected(efficiency::Option::Realtime)?MF_CHECKED:0),2,L"Keep Defender real-time protection off");
+    AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
+    AppendMenuW(menu,MF_STRING,3,L"About these controls / recovery");
+    RECT rect{};GetWindowRect(GetDlgItem(window,EfficiencyButton),&rect);
+    const UINT selected=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_NONOTIFY|TPM_RIGHTALIGN,rect.right,rect.bottom,0,window,nullptr);DestroyMenu(menu);
+    if(selected==1||selected==2){
+        if(dryRun){MessageBoxW(window,L"Efficiency options are unavailable in observation/test mode.",L"Pulse",MB_OK);return;}
+        DWORD e=efficiencyOptions.toggle(window,selected==1?efficiency::Option::Update:efficiency::Option::Realtime);
+        if(e)logEvent(L"Efficiency helper could not start: "+std::to_wstring(e));
+        updateUi();
+    }else if(selected==3){
+        MessageBoxW(window,L"Each check requests a machine-wide setting. Selections are remembered. The installed broker runs with administrator rights without repeated prompts; portable mode asks once per session.\n\n"
+            L"Update: stop and disable wuauserv; watch for changes. This delays updates and may affect Store/other update clients. It does not undo updates already installed or stop all servicing.\n\n"
+            L"Real-time: request Defender real-time protection off and verify it. Files will not receive normal real-time scanning. Tamper Protection and organization policies are respected; a blocked request is shown explicitly.\n\n"
+            L"Both controls restore captured settings when unchecked or on Restore & exit, including recovery after the main app crashes. Saved selections resume next time Pulse starts. Pause only pauses CPU power control.\n\n"
+            L"Corrections are automatic. Repeated conflicts use a 30-second retry backoff to avoid wasting CPU. Tamper Protection is not bypassed. If restoration fails, the protected recovery journal is retained for retry on restart. Windows can still override these controls.",L"Pulse — Efficiency options",MB_OK|MB_ICONINFORMATION);
+    }
+}
 static void cleanup() {
     if(shuttingDown)return;shuttingDown=true;
     if(!reportOnExit.empty())saveText(reportOnExit,runtimeReport());
     turnOff(false);Shell_NotifyIconW(NIM_DELETE,&tray);
+    efficiencyOptions.stop();
     if(displayNotification)UnregisterPowerSettingNotification(displayNotification);
     if(sourceNotification)UnregisterPowerSettingNotification(sourceNotification);
     if(schemeNotification)UnregisterPowerSettingNotification(schemeNotification);
@@ -498,6 +532,7 @@ static void powerEvent() {
 static LRESULT CALLBACK procedure(HWND h,UINT m,WPARAM w,LPARAM l) {
     if(m==taskbarCreated&&taskbarCreated) {Shell_NotifyIconW(NIM_ADD,&tray);return 0;}
     switch(m) {
+    case efficiency::ChangedMessage:updateUi();return 0;
     case WM_CREATE:window=h;processMonitor.attach(h,ProductiveExitMsg);return 0;
     case EditIntentMsg:editIntent();return 0;
     case ProductiveExitMsg:
@@ -507,7 +542,7 @@ static LRESULT CALLBACK procedure(HWND h,UINT m,WPARAM w,LPARAM l) {
     case WM_PAINT:paint();return 0;
     case WM_DRAWITEM:drawButton(reinterpret_cast<DRAWITEMSTRUCT*>(l));return TRUE;
     case WM_CTLCOLORSTATIC:{HDC dc=reinterpret_cast<HDC>(w);HWND c=reinterpret_cast<HWND>(l);
-        bool outside=labels.size()>14&&(c==labels[0]||c==labels[1]||c==labels[7]||c==labels[14]);
+        bool outside=labels.size()>14&&(c==labels[0]||c==labels[1]||c==labels[7]||c==labels[14]||(labels.size()>17&&(c==labels[16]||c==labels[17])));
         SetTextColor(dc,Text);SetBkColor(dc,outside?Background:Card);SetBkMode(dc,OPAQUE);
         return reinterpret_cast<LRESULT>(outside?backgroundBrush:cardBrush);}
     case SchedulerRefreshMsg:
@@ -550,11 +585,12 @@ static LRESULT CALLBACK procedure(HWND h,UINT m,WPARAM w,LPARAM l) {
     case WM_DESTROY:PostQuitMessage(0);return 0;
     case WM_SIZE:if(w==SIZE_MINIMIZED){ShowWindow(h,SW_HIDE);setTimer();}return 0;
     case WM_DPICHANGED:{uiScale=HIWORD(w)/96.0;auto r=reinterpret_cast<RECT*>(l);SetWindowPos(h,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);
-        for(auto c:labels)DestroyWindow(c);labels.clear();for(int id=101;id<=109;++id)DestroyWindow(GetDlgItem(h,id));
+        for(auto c:labels)DestroyWindow(c);labels.clear();for(int id=101;id<=110;++id)DestroyWindow(GetDlgItem(h,id));
         DeleteObject(regular);DeleteObject(fontSmall);DeleteObject(heading);DeleteObject(hero);DeleteObject(bold);makeUi();updateUi();return 0;}
     case TrayMsg:if(l==WM_LBUTTONUP||l==WM_LBUTTONDBLCLK)showWindow();else if(l==WM_RBUTTONUP)trayMenu();return 0;
     case WM_COMMAND:
         switch(LOWORD(w)) {
+        case EfficiencyButton:if(HIWORD(w)==BN_CLICKED)efficiencyMenu();break;
         case AutoButton:efficientOnly=false;turnOn();updateUi();break;
         case EcoButton:efficientOnly=true;turnOn();if(enabled&&(policy.burst||compute.active)){policy.reset(GetTickCount64());compute.reset();applyState();}updateUi();break;
         case PauseButton:if(armed)turnOff(false);else turnOn();break;
@@ -621,12 +657,36 @@ static int schedulerGuiTest(HINSTANCE instance,const std::wstring& output) {
     RECT left{},right{};GetWindowRect(button,&left);GetWindowRect(GetDlgItem(window,AcButton),&right);
     const bool layout=left.right<right.left&&left.bottom==right.bottom;
     const bool noPowerWrites=power.writes==0&&!enabled&&!armed;
+    RECT efficiencyRect{},statusRect{};
+    GetWindowRect(GetDlgItem(window,EfficiencyButton),&efficiencyRect);
+    GetWindowRect(labels[7],&statusRect);
+    const bool efficiencyDefault=!efficiencyOptions.selected(efficiency::Option::Update)&&!efficiencyOptions.selected(efficiency::Option::Realtime);
+    const bool efficiencyLayout=efficiencyRect.top>=statusRect.bottom&&labels.size()==18;
     std::wostringstream report;report<<L"defaultOff="<<defaultOff<<L" offPersisted="<<off<<L" offText="<<offText
-      <<L" onPersisted="<<on<<L" onText="<<onText<<L" layout="<<layout<<L" noPowerWrites="<<noPowerWrites<<L"\n"<<schedulerGuard.report();
+      <<L" onPersisted="<<on<<L" onText="<<onText<<L" layout="<<layout<<L" noPowerWrites="<<noPowerWrites
+      <<L" efficiencyDefault="<<efficiencyDefault<<L" efficiencyLayout="<<efficiencyLayout<<L"\n"<<schedulerGuard.report();
     const bool saved=saveText(output,report.str());
     for(auto f:{regular,fontSmall,heading,hero,bold})DeleteObject(f);
     DeleteObject(backgroundBrush);DeleteObject(cardBrush);DestroyWindow(window);window=nullptr;
-    return defaultOff&&off&&offText&&on&&onText&&layout&&noPowerWrites&&saved?0:4;
+    return defaultOff&&off&&offText&&on&&onText&&layout&&noPowerWrites&&efficiencyDefault&&efficiencyLayout&&saved?0:4;
+}
+static int efficiencyPreview(HINSTANCE instance) {
+    dryRun=true;autoStart=false;armed=enabled=false;
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    uiScale=GetDpiForSystem()/96.0;
+    backgroundBrush=CreateSolidBrush(Background);cardBrush=CreateSolidBrush(Card);
+    WNDCLASSEXW wc{sizeof(wc)};wc.lpfnWndProc=procedure;wc.hInstance=instance;
+    wc.lpszClassName=L"PulseEfficiencyPreview";wc.hbrBackground=backgroundBrush;
+    wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassExW(&wc);
+    RECT size{0,0,px(804),px(840)};
+    DWORD style=WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX;
+    AdjustWindowRectExForDpi(&size,style,FALSE,0,static_cast<UINT>(96*uiScale));
+    window=CreateWindowExW(0,wc.lpszClassName,L"Pulse — Efficiency options preview (no system writes)",style,CW_USEDEFAULT,CW_USEDEFAULT,size.right-size.left,size.bottom-size.top,nullptr,nullptr,instance,nullptr);
+    if(!window)return 3;
+    makeUi();updateUi();ShowWindow(window,SW_SHOW);
+    SetTimer(window,StopTimer,120000,nullptr);
+    MSG message;while(GetMessageW(&message,nullptr,0,0)>0){TranslateMessage(&message);DispatchMessageW(&message);}
+    return 0;
 }
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int) {
     launchTime=GetTickCount64();cpuAtStart=ownCpu();
@@ -634,6 +694,11 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int) {
     std::vector<std::wstring> args;for(int i=1;i<argc;++i)args.emplace_back(argv[i]);LocalFree(argv);
     auto has=[&](const wchar_t* a){return std::find(args.begin(),args.end(),a)!=args.end();};
     auto value=[&](const wchar_t* a)->std::wstring{auto p=std::find(args.begin(),args.end(),a);return p!=args.end()&&++p!=args.end()?*p:L"";};
+    if(has(L"--efficiency-helper"))return efficiency::helper(value(L"--efficiency-helper"),wcstoul(value(L"--parent").c_str(),nullptr,10),reinterpret_cast<HWND>(_wcstoui64(value(L"--owner").c_str(),nullptr,10)));
+    if(has(L"--efficiency-diagnose"))return efficiency::diagnose(value(L"--efficiency-diagnose"));
+    if(has(L"--efficiency-exercise"))return efficiency::exercise(value(L"--efficiency-exercise"));
+    if(has(L"--efficiency-client-exercise"))return efficiency::clientExercise(value(L"--efficiency-client-exercise"));
+    if(has(L"--efficiency-preview"))return efficiencyPreview(instance);
     if(has(L"--scheduler-gui-test"))return schedulerGuiTest(instance,value(L"--scheduler-gui-test"));
     if(has(L"--topology")){
         auto topology=scheduler::discoverTopology();
@@ -669,7 +734,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int) {
     uiScale=GetDpiForSystem()/96.0;
     backgroundBrush=CreateSolidBrush(Background);cardBrush=CreateSolidBrush(Card);
     WNDCLASSEXW wc{sizeof(wc)};wc.lpfnWndProc=procedure;wc.hInstance=instance;wc.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(1));wc.hIconSm=wc.hIcon;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.lpszClassName=ClassName;wc.hbrBackground=backgroundBrush;RegisterClassExW(&wc);
-    RECT size{0,0,px(804),px(780)};DWORD style=WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX|WS_CLIPCHILDREN;
+    RECT size{0,0,px(804),px(840)};DWORD style=WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX|WS_CLIPCHILDREN;
     AdjustWindowRectExForDpi(&size,style,FALSE,0,static_cast<UINT>(96*uiScale));
     CreateWindowExW(0,ClassName,L"Pulse — Adaptive Power",style,CW_USEDEFAULT,CW_USEDEFAULT,size.right-size.left,size.bottom-size.top,nullptr,nullptr,instance,nullptr);
     if(!window){ReleaseMutex(singleton);CloseHandle(singleton);return 3;}
@@ -682,6 +747,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int) {
     saverNotification=RegisterPowerSettingNotification(window,&GUID_POWER_SAVING_STATUS,DEVICE_NOTIFY_WINDOW_HANDLE);
     WTSRegisterSessionNotification(window,NOTIFY_FOR_THIS_SESSION);
     if(!has(L"--hidden"))ShowWindow(window,SW_SHOW);
+    if(!dryRun){DWORD e=efficiencyOptions.resume(window);if(e)logEvent(L"Efficiency options could not resume: "+std::to_wstring(e));}
     environment();if(!dryRun){DWORD e=power.restore();if(e){fault=L"Previous settings need recovery: "+std::to_wstring(e);autoStart=false;}}if(autoStart)turnOn();else updateUi();setTimer();
     auto seconds=value(L"--seconds");if(!seconds.empty()){unsigned long duration=wcstoul(seconds.c_str(),nullptr,10);if(duration>0&&duration<=3600)SetTimer(window,StopTimer,duration*1000,nullptr);}
     MSG message;while(GetMessageW(&message,nullptr,0,0)>0){if(!IsDialogMessageW(window,&message)){TranslateMessage(&message);DispatchMessageW(&message);}}

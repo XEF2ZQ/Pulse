@@ -14,7 +14,7 @@ sdkver = sorted((sdk/'Include').iterdir())[-1].name
 # Path and PATH, which MSBuild rejects, so normalize keys for child processes.
 env = {key.upper(): value for key, value in os.environ.items()}
 env['PATH'] = str(msvc/'bin/Hostx64/x64')+';'+str(sdk/'bin'/sdkver/'x64')+';'+env.get('PATH','')
-env['INCLUDE'] = ';'.join(map(str,[msvc/'include',sdk/'Include'/sdkver/'ucrt',sdk/'Include'/sdkver/'shared',sdk/'Include'/sdkver/'um']))
+env['INCLUDE'] = ';'.join(map(str,[msvc/'include',sdk/'Include'/sdkver/'ucrt',sdk/'Include'/sdkver/'shared',sdk/'Include'/sdkver/'um',sdk/'Include'/sdkver/'winrt']))
 env['LIB'] = ';'.join(map(str,[msvc/'lib/x64',sdk/'Lib'/sdkver/'ucrt/x64',sdk/'Lib'/sdkver/'um/x64']))
 build = root/'build-native'
 ninja = shutil.which('ninja.exe')

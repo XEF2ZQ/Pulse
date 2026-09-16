@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0-efficiency-preview — 2026-09-17
+
+- Add the independently checkable **Efficiency options** dropdown for Windows Update service control and Defender real-time preference control; both OFF by default with remembered selections.
+- Isolate administrative operations in a native helper; keep the CPU controller unelevated and unchanged.
+- Use SCM and Defender event notifications with coalescing, readback and automatic retry backoff; no healthy steady-state polling timer.
+- Add one-time installation of a protected, on-demand Task Scheduler broker for normal operation without recurring UAC prompts; validate transport and saved-selection resume locally.
+- Preserve per-option baselines in a protected recovery journal; restore on deselect or controller exit and surface recovery failures.
+- Respect Tamper Protection and management policy; do not claim unbypassable suppression or battery-runtime gains.
+- Add failure-injection tests, a read-only provider diagnostic and explicit Update-only integration exercises. Document live validation and remaining Defender setter/long-duration coverage gaps.
+
 ## 1.2 publication and PulseTailProbe 0.2 — 2026-09-10
 
 - Publish the 1.2 productive-demand controller with its existing local validation scope.

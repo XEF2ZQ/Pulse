@@ -42,5 +42,7 @@ jobs:
             tools/TAIL_PROBE.md
             tools/analyze_tail.py
             tools/component_tail.py
+            tools/Install-EfficiencyBroker.ps1
+            docs/efficiency-options.md
             LICENSE
             NOTICE.md
