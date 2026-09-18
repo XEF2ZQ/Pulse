@@ -20,7 +20,11 @@ flowchart TD
     Power --> Journal[Source-specific restore journal]
     Guardian[Waiting recovery companion] --> Journal
     Guardian --> Power
-    Controller --> Guard[Optional scheduler diagnostics]
+    Controller --> Placement[Optional background CPU-set placement]
+    Placement --> Topology
+    Placement --> PlacementJournal[Thread identity and selection journal]
+    Guardian --> PlacementJournal
+    Controller --> Guard[Legacy scheduler diagnostics]
     Guard --> Topology[Read-only Windows topology]
 ```
 
@@ -72,12 +76,13 @@ The compare-and-restore check cannot distinguish another writer choosing exactly
 |---|---|
 | Windows source power mode and CPU boost | Pulse |
 | Minimum active logical cores / minimum processor state | Pulse baseline configuration |
-| Standard parking and automatic long/short-thread policy | Pulse baseline configuration |
+| Parking and long/short-thread policy | Configurable Pulse baseline; standard/automatic defaults |
 | Explicit EPP register/value tuning | No Pulse actuator; Windows/OEM policy remains authoritative |
 | Fan curves, GPU mode, TDP, Curve Optimizer | G Helper / OEM |
-| Per-thread affinity, ideal processor, CPU sets, priorities, QoS | Windows / applications; scheduler guard does not write these |
+| Per-thread selected CPU sets | Optional adaptive placement, default OFF; reversible ownership for eligible threads |
+| Hard affinity, ideal processor, priorities, QoS | Windows / applications; Pulse does not write these |
 
-The baseline scheduling-policy values are distinct from the optional Scheduler guard switch. Turning that switch off does not remove the existing baseline power configuration.
+The baseline policies are distinct from adaptive placement. Turning placement off does not undo an explicitly applied baseline. The 1.4 UI replaces the old diagnostic guard button with Adaptive scheduler; its new preference defaults OFF. Read [power controls and placement](power-controls.md) for admission thresholds, native enumeration compatibility, recovery and the unavailable undervolt backend.
 
 ## Source map
 
@@ -91,6 +96,9 @@ The baseline scheduling-policy values are distinct from the optional Scheduler g
 - `src/power.cpp`, `src/power.h`: snapshot, recovery journal, native writes, readback and restore.
 - `src/scheduler_topology.*`: variable-record parsing and read-only topology discovery.
 - `src/scheduler_policy.h`: optional diagnostics, conservative cost predicate, preference persistence; no placement actuator.
+- `src/profile_config.h`, `src/controls_ui.inl`: AC/DC profiles, three-page native controls, validation and apply transaction.
+- `src/placement_policy.h`, `src/placement.*`: bounded background evidence, CPU-set actuator, identity journal and recovery.
+- `src/undervolt.h`: read-only identity/capability model; no hardware writer or readback backend.
 
 ## Independent diagnostics
 

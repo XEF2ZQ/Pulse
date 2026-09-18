@@ -7,11 +7,11 @@ Pulse temporarily gives interactive requests and productive CPU work more perfor
 
 The implementation combines foreground intent, measured process-tree CPU demand, bounded process-exit notifications and a source-specific recovery journal. It uses Windows policy APIs and leaves hardware tuning to G Helper/OEM firmware.
 
-**Current publication: Pulse 1.3.0-efficiency-preview + PulseTailProbe 0.2.** Locally built and tested on one ASUS Ryzen AI 9 HX 370 laptop. Eight native suites and fifteen offline analysis tests passed. Hosted CI is configured; earlier execution was blocked by a GitHub account restriction. Local verification is documented independently.
+**Current source patch: Pulse 1.4.0-controls-preview.** Adds editable AC/DC profiles and optional background-thread placement. Nine native suites passed locally on one ASUS Ryzen AI 9 HX 370 laptop. The undervolt page is a capability inspector and draft editor; Apply/reapplication remain unavailable. See [scope, validation and limits](docs/power-controls.md). Latest published release remains 1.3.0-efficiency-preview; this source patch does not imply a new hosted release or CI run.
 
 **New: [Efficiency options](docs/efficiency-options.md).** An opt-in dropdown provides remembered Windows Update service and Defender real-time preference controls, with an optional installed administrator broker, event notifications, automatic correction/backoff, verified status and recovery records. Both default OFF. Update correction, restoration and no-prompt broker transport passed local tests. Defender's live setter is unverified and respects Tamper Protection; these controls are not unbypassable. No battery benefit from them is claimed.
 
-**No battery-runtime gain is claimed yet.** Policy transitions, observer overhead and battery-reported recovery have been measured; paired runtime/energy-per-completed-work validation is still planned. The optional Scheduler guard is diagnostic and OFF by default. No SMU power-limit, undervolting, NPU or per-thread placement actuator is shipped.
+**No battery-runtime gain is claimed yet.** Policy transitions, observer overhead and battery-reported recovery have been measured; paired runtime/energy-per-completed-work validation is still planned. Adaptive thread placement is experimental and OFF by default. No SMU power-limit, undervolting or NPU actuator is shipped.
 
 ## Review the project
 
@@ -23,6 +23,7 @@ The implementation combines foreground intent, measured process-tree CPU demand,
 | [Failure handling](docs/failure-handling.md) | Missing evidence, external changes and controller failure |
 | [Evidence index](docs/evidence/README.md) | Claim-to-test mapping and reproducible sanitized traces |
 | [Usage and recovery](docs/usage.md) | Controls, G Helper handoff, Pause and restoration |
+| [Power controls and adaptive placement](docs/power-controls.md) | Three-page UI, persistent AC/DC profiles, reversible CPU sets and undervolt capability limits |
 | [Build and verification](docs/build.md) | Toolchain, native/Python tests and hosted-check limits |
 | [Roadmap](docs/roadmap.md) | Remaining work and acceptance gates |
 

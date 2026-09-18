@@ -40,9 +40,9 @@ static DWORD explicitMask(const GUID& scheme,DWORD index) {
     if(RegGetValueW(HKEY_LOCAL_MACHINE,path.c_str(),L"DCSettingIndex",RRF_RT_REG_DWORD,nullptr,&data,&size)==ERROR_SUCCESS)mask|=2;
     return mask;
 }
-static DWORD checksum(const Snapshot& s) {
+template<class T> static DWORD checksum(const T& s) {
     const auto* data=reinterpret_cast<const unsigned char*>(&s); DWORD h=2166136261u;
-    for(size_t i=0;i<offsetof(Snapshot,checksum);++i)h=(h^data[i])*16777619u; return h;
+    for(size_t i=0;i<offsetof(T,checksum);++i)h=(h^data[i])*16777619u; return h;
 }
 Power::Power() {
     HMODULE m=GetModuleHandleW(L"powrprof.dll");
@@ -83,10 +83,28 @@ DWORD Power::saveJournal() {
 DWORD Power::loadJournal(Snapshot& out)const {
     HANDLE f=CreateFileW(journalPath().c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,0,nullptr);
     if(f==INVALID_HANDLE_VALUE)return GetLastError(); DWORD n=0;
-    bool ok=GetFileSize(f,nullptr)==sizeof(out)&&ReadFile(f,&out,sizeof(out),&n,nullptr)&&n==sizeof(out); CloseHandle(f);
-    if(!ok||out.magic!=0x50554C53||(out.version!=1&&out.version!=2)||out.count>48||out.count<6||out.checksum!=checksum(out))return ERROR_INVALID_DATA;
+    struct LegacyRow { GUID scheme; DWORD setting, ac, dc, mask; };
+    struct LegacySnapshot { DWORD magic,version,owner,count; GUID scheme,acMode,dcMode; LegacyRow rows[48]; DWORD checksum; };
+    const DWORD size=GetFileSize(f,nullptr);
+    bool ok=false;
+    if(size==sizeof(out)) {
+        ok=ReadFile(f,&out,sizeof(out),&n,nullptr)&&n==sizeof(out)&&out.version==3&&out.checksum==checksum(out);
+    } else if(size==sizeof(LegacySnapshot)) {
+        LegacySnapshot old{};
+        ok=ReadFile(f,&old,sizeof(old),&n,nullptr)&&n==sizeof(old)&&old.magic==0x50554C53&&
+            (old.version==1||old.version==2)&&old.count<=48&&old.checksum==checksum(old);
+        if(ok) {
+            out=Snapshot{};out.version=old.version;out.owner=old.owner;out.count=old.count;out.scheme=old.scheme;out.acMode=old.acMode;out.dcMode=old.dcMode;
+            for(DWORD i=0;i<old.count;++i) {
+                const auto& r=old.rows[i];if(r.setting>=settings().size()){ok=false;break;}
+                const auto& s=settings()[r.setting];out.rows[i]={r.scheme,r.setting,r.ac,r.dc,r.mask,s.ac,s.dc};
+            }
+        }
+    }
+    CloseHandle(f);
+    if(!ok||out.magic!=0x50554C53||out.count>48||out.count<6)return ERROR_INVALID_DATA;
     for(DWORD i=0;i<out.count;++i) {
-        const auto& r=out.rows[i]; if(r.setting>=settings().size()||r.ac>100||r.dc>100||r.mask<1||r.mask>3)return ERROR_INVALID_DATA;
+        const auto& r=out.rows[i]; if(r.setting>=settings().size()||r.ac>100||r.dc>100||r.targetAc>100||r.targetDc>100||r.mask<1||r.mask>3)return ERROR_INVALID_DATA;
         if(r.scheme!=out.scheme&&r.scheme!=GUID_POWER_MODE_BEST_EFFICIENCY&&r.scheme!=GUID_POWER_MODE_BEST_PERFORMANCE)return ERROR_INVALID_DATA;
     }
     return 0;
@@ -99,7 +117,7 @@ DWORD Power::capture(DWORD sourceMask) {
     e=mode(true,saved.acMode); if(e)return e; e=mode(false,saved.dcMode); if(e)return e;
     for(const GUID& scheme:{saved.scheme,GUID_POWER_MODE_BEST_EFFICIENCY,GUID_POWER_MODE_BEST_PERFORMANCE}) {
         for(DWORD i=0;i<settings().size();++i) {
-            Row r{scheme,i,0,0,explicitMask(scheme,i)};
+            Row r{scheme,i,0,0,explicitMask(scheme,i),profiles.value(i,true),profiles.value(i,false)};
             if(!r.mask){if(scheme==saved.scheme&&i!=2&&i!=4)return ERROR_NOT_SUPPORTED;continue;}
             if(scheme==saved.scheme&&r.mask!=3)return ERROR_NOT_SUPPORTED;
             auto a=read(scheme,i,true,r.ac),d=read(scheme,i,false,r.dc);
@@ -114,12 +132,34 @@ DWORD Power::capture(DWORD sourceMask) {
 DWORD Power::configure() {
     if(!owned)return ERROR_INVALID_STATE;
     for(DWORD i=0;i<saved.count;++i) {
-        auto& r=saved.rows[i]; auto& s=settings()[r.setting];
+        auto& r=saved.rows[i];
         DWORD e=0;
-        if(r.mask&1){e=write(r.scheme,r.setting,true,s.ac); if(e)return e;}
-        if(r.mask&2){e=write(r.scheme,r.setting,false,s.dc); if(e)return e;}
+        if(r.mask&1){e=write(r.scheme,r.setting,true,r.targetAc); if(e)return e;}
+        if(r.mask&2){e=write(r.scheme,r.setting,false,r.targetDc); if(e)return e;}
     }
     return apply(false);
+}
+DWORD Power::persistProfiles() {
+    if(owned||!profiles.valid())return ERROR_INVALID_STATE;
+    DWORD e=capture(3);if(e)return e;
+    for(DWORD i=0;i<saved.count&&!e;++i) {
+        const auto& r=saved.rows[i];if(settings()[r.setting].dynamic)continue;
+        for(bool ac:{true,false})if(r.mask&(ac?1:2)) {
+            e=write(r.scheme,r.setting,ac,ac?r.targetAc:r.targetDc);if(e)break;
+        }
+    }
+    if(!e)e=PowerSetActiveScheme(nullptr,&saved.scheme);
+    if(!e){GUID current{};e=activeScheme(current);if(!e&&current!=saved.scheme)e=ERROR_INVALID_STATE;}
+    for(DWORD i=0;i<saved.count&&!e;++i){
+        const auto& r=saved.rows[i];if(settings()[r.setting].dynamic)continue;
+        for(bool ac:{true,false})if(r.mask&(ac?1:2)){
+            DWORD value=0;e=read(r.scheme,r.setting,ac,value);
+            if(!e&&value!=(ac?r.targetAc:r.targetDc))e=ERROR_INVALID_STATE;if(e)break;
+        }
+    }
+    if(e){const DWORD recovery=restore();return recovery?recovery:e;}
+    if(!DeleteFileW(journalPath().c_str())){e=GetLastError();restore();return e;}
+    owned=false;return ERROR_SUCCESS;
 }
 static DWORD boostFor(PowerState state){return state==PowerState::Burst?2:state==PowerState::Compute?4:0;}
 static GUID modeFor(PowerState state){return state==PowerState::Efficiency?GUID_POWER_MODE_BEST_EFFICIENCY:GUID_POWER_MODE_BEST_PERFORMANCE;}
@@ -152,7 +192,7 @@ DWORD Power::verify(PowerState state,bool full)const {
     for(DWORD i=0;i<saved.count;++i) {
         const auto& r=saved.rows[i]; const auto& s=settings()[r.setting]; if(!full&&!s.dynamic)continue;
         for(bool ac:{true,false}) { if(!(r.mask&(ac?1:2)))continue; DWORD value=0; e=read(r.scheme,r.setting,ac,value); if(e)return e;
-            DWORD expected=s.dynamic?boostFor(state):(ac?s.ac:s.dc); if(value!=expected)return ERROR_INVALID_STATE;
+            DWORD expected=s.dynamic?boostFor(state):(ac?r.targetAc:r.targetDc); if(value!=expected)return ERROR_INVALID_STATE;
         }
     }
     SYSTEM_POWER_STATUS status{}; if(!GetSystemPowerStatus(&status))return GetLastError();
@@ -169,7 +209,7 @@ DWORD Power::restore(DWORD expectedOwner) {
         for(bool ac:{true,false}) {
             if(!(r.mask&(ac?1:2)))continue;
             DWORD value=0; e=read(r.scheme,r.setting,ac,value); if(e){if(!firstError)firstError=e;continue;}
-            const DWORD original=ac?r.ac:r.dc, target=ac?s.ac:s.dc;
+            const DWORD original=ac?r.ac:r.dc, target=ac?r.targetAc:r.targetDc;
             // Preserve a third party's newer value rather than silently undoing it.
             if(value==target||(s.dynamic&&(value==0||value==2||(snap.version>=2&&value==4)))) { e=write(r.scheme,r.setting,ac,original); if(e&&!firstError)firstError=e; }
         }

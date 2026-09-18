@@ -27,6 +27,9 @@ MSVC builds use C++20 and a static C/C++ runtime. The application and topology i
 | `live_topology` | Actual Windows topology discovery | Read-only |
 | `scheduler_live` | Unit checks plus independent local OS topology cross-checks | Read-only |
 | `scheduler_gui` | Real native button events, OFF default, persistence, text/layout, no-write check | Creates an isolated test INI/report; no power control |
+| `controls_policy` | AC/DC mappings and ranges, placement thresholds/cooldown, undervolt capability gating | No system writes |
+
+The 1.4 local patch passes nine native suites; GUI coverage also includes all three pages, invalid profile rejection and disabled unsupported undervolt actions. `placement_probe` is a separate opt-in executable that moves only its synthetic child fixture, then checks demand release. `Pulse --placement-exercise report.txt` exercises only its own diagnostic thread and isolated recovery journal. Neither is run by hosted CI. The `--exercise` diagnostic changes real Windows power policy temporarily and restores it; run only deliberately with the resident controller stopped. [Validation scope](power-controls.md#validation-and-limits).
 
 Run all local checks with `ctest --test-dir build --output-on-failure`. The topology integration checks may reject incomplete virtual-machine topology; their purpose is to validate the actual target, not to assume every host exposes sufficient data.
 

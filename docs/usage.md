@@ -29,7 +29,9 @@ Run only one controller instance. Close the window to leave Pulse in the tray. P
 | Efficiency options | Two independent administrative requests with remembered selections, OFF by default; see [behavior, one-time broker setup and recovery](efficiency-options.md) |
 | Boost now | Request a short bounded performance burst; eligibility and policy limits still apply |
 | Plugged-in control | Persist AC opt-in; OFF by default |
-| Scheduler guard | Persist diagnostic topology/classification opt-in; OFF by default; no thread-placement changes |
+| Adaptive scheduler | Optional reversible background-thread CPU-set placement; OFF by default |
+| Power & scheduling page | Edit AC/DC parking, frequency-scaling minima and scheduling policies; Apply persists both baselines |
+| CPU undervolt page | CPU identity and capability inspection; values are drafts, Apply/monitoring unavailable |
 | Diagnostics | Generate current power/runtime information locally |
 | G Helper | Open the separately configured G Helper application |
 
@@ -80,5 +82,5 @@ The journal does not survive every possible system/storage failure. Restoration 
 - Sustained-work discovery/settling is sampled and can take seconds. Very short jobs and unknown background tools may be missed.
 - Browser navigation signals are not semantic page-load or playback decoding instrumentation.
 - A historical visible-window test incurred high accessibility-query overhead. Close the UI to the tray for normal operation; see [validation](validation.md).
-- No direct EPP, NPU, undervolting, package-power-limit or per-thread placement actuator is included.
+- No direct EPP, NPU, undervolting or package-power-limit actuator is included. Optional thread placement and its limits are described in [power controls](power-controls.md).
 - Binaries are unsigned; this snapshot does not promise crash-free operation or measured battery savings.

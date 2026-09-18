@@ -9,7 +9,7 @@ These are remaining validation and development goals. The 1.2 patch implements s
 | Repeatable everyday + development experiment | Versioned mixed-workload harness, paired Automatic/Paused battery runs | Reproducible inputs, equal completed work, latency/quality measures and full result distribution |
 | Faster productive-work lifecycle detection | Process-start/exit assistance and bounded job leases alongside adaptive sampling | Measure onset/exit percentiles, child-process races, persistent hosts, cancellation, access denial and total observer overhead |
 | Open-set productive-work recognition | Behavioral evidence for unknown build/render/export/simulation work; preserve specific fast paths | Held-out unseen applications, background process trees, mixed media + build cases and false-positive/false-negative analysis |
-| Optional scheduling actuator | Only if calibrated energy-per-work evidence supports a reversible placement/QoS trial | Cache/SMT/NUMA costs, deadline preservation, topology invalidation, restore tests and net energy benefit after monitoring cost |
+| Optional scheduling actuator | 1.4 adds a default-OFF reversible CPU-set trial; no energy benefit established | Paired energy-per-work, cache/SMT/NUMA costs, application latency and net benefit after monitoring cost before considering a default change |
 | Wider compatibility | Additional AMD/Intel machines, OEM configurations, sleep and power-source transitions | Per-device validation, unsupported-capability fallback and recovery results |
 | Distribution maturity | Signed release packaging and reviewed installation/upgrade/uninstall flows | Clean-machine tests, provenance, migration/rollback checks and redistribution review |
 

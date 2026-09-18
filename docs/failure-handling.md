@@ -40,6 +40,6 @@ sequenceDiagram
     end
 ```
 
-The journal checksum detects accidental corruption, not malicious same-user changes. Pulse is not a security boundary against other software running as that user. Direct hardware control and thread placement are not hidden fallback paths when Windows policy is insufficient.
+The journal checksum detects accidental corruption, not malicious same-user changes. Pulse is not a security boundary against other software running as that user. Direct hardware control is not a hidden fallback when Windows policy is insufficient. The separately opted-in 1.4 CPU-set actuator has its own identity/selection journal: recovery preserves different external selections and errors stop new placement. See [placement recovery](power-controls.md#optional-adaptive-scheduler).
 
 There is no claim of exhaustive fault injection. Restore tests, source transitions and forced-exit observations are dated in [validation](validation.md); scenarios not rerun for 1.2 remain outstanding. Dynamic hardware limits need their own single-owner lease, partial-write handling, readback and crash/source-loss restoration. [SMU evaluation](smu-cap-evaluation.md).

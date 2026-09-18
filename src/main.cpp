@@ -3,6 +3,8 @@
 #include "productive_monitor.h"
 #include "scheduler_policy.h"
 #include "efficiency.h"
+#include "placement.h"
+#include "undervolt.h"
 #include <dbt.h>
 #include <windowsx.h>
 #include <objbase.h>
@@ -22,6 +24,7 @@
 #include <iomanip>
 #include <filesystem>
 #include <algorithm>
+#include <uxtheme.h>
 
 using namespace pulse;
 constexpr wchar_t ClassName[]=L"PulseAdaptivePowerWindow";
@@ -36,6 +39,11 @@ static Power power;
 static Policy policy;
 static ComputePolicy compute;
 static ProductiveMonitor processMonitor;
+static placement::Controller placementController;
+static int currentPage=0;
+static void updatePages();
+static void makePages();
+static void showPage(int page);
 static bool armed=false, manageAC=false;
 static scheduler::SchedulerGuard schedulerGuard;
 static bool schedulerTopologyDirty=true, schedulerRefreshQueued=false;
@@ -113,6 +121,7 @@ static std::wstring processName(HANDLE process) {
     std::transform(name.begin(),name.end(),name.begin(),[](wchar_t c){return static_cast<wchar_t>(towlower(c));});return name;
 }
 static void schedulerEvent() {
+    if(!dryRun)placementController.tick(GetTickCount64(),foregroundPid,enabled&&!sample.blocked,policy.burst||compute.active);
     scheduler::WorkloadEvidence evidence;
     evidence.interactive=policy.burst;
     evidence.productive=compute.active;
@@ -274,6 +283,7 @@ static void turnOn() {
     setTimer();updateUi();
 }
 static void turnOff(bool fromFailure) {
+    placementController.release();
     finishBenchmark();
     if(burstAppliedAt){burstMs+=GetTickCount64()-burstAppliedAt;burstAppliedAt=0;}
     enabled=false;armed=false;policy.burst=false;compute.reset();processMonitor.clear();schedulerEvent();
@@ -294,6 +304,7 @@ static void setTimer() {
     uint64_t burstInterval=policy.deadline>GetTickCount64()?std::clamp<uint64_t>(policy.deadline-GetTickCount64(),16,125):16;
     uint64_t demandInterval=processMonitor.interval(GetTickCount64());
     uint64_t next=enabled?(sample.blocked?10000:policy.burst?std::min(burstInterval,demandInterval):demandInterval<1000?demandInterval:sample.inputAge>15000?3000:1000):IsWindowVisible(window)?1000:0;
+    if(enabled&&!sample.blocked&&placementController.enabled)next=std::min<uint64_t>(next,1000);
     if(timerInterval==next)return;KillTimer(window,TickTimer);timerInterval=next;
     if(next)SetCoalescableTimer(window,TickTimer,static_cast<UINT>(next),nullptr,policy.burst?0:100);
 }
@@ -326,6 +337,7 @@ static void tick() {
         if(efficientOnly){compute.reset();processMonitor.clear();lastComputeSample=0;if(policy.burst)policy.reset(sample.now);}
         else policy.tick(sample);
         if(before!=state())applyState();
+        if(!dryRun)placementController.tick(sample.now,foregroundPid,!sample.blocked,policy.burst||compute.active);
         if(enabled&&!dryRun&&sample.now-lastAudit>=10000) {
             lastAudit=sample.now;DWORD e=power.verify(state(),true);
             if(!e&&(!guardianProcess||WaitForSingleObject(guardianProcess,0)!=WAIT_TIMEOUT))e=ERROR_PROCESS_ABORTED;
@@ -369,7 +381,7 @@ static std::wstring runtimeReport() {
         <<L"\nForeground notification: "<<(foregroundHook?L"active":L"off")<<L"\nKeyboard navigation: "<<(keyboardRegistered?L"active":L"off")
         <<L"\nRecovery companion: "<<(guardianProcess&&WaitForSingleObject(guardianProcess,0)==WAIT_TIMEOUT?L"waiting":L"off")
         <<L"\nFault: "<<fault<<L"\n\nRecent decisions (no keys, titles, URLs or audio recorded)\n";
-    out<<schedulerGuard.report()<<L"\n";
+    out<<schedulerGuard.report()<<L"\n"<<placementController.report()<<L"\n";
     for(const auto& line:events)out<<line<<L"\n";
     if(traceCount){out<<L"\nBenchmark traces: sequence,begin_qpc_ms,end_qpc_ms,source,burst,accepted,error\n";
         for(uint64_t i=traceCount>traces.size()?traceCount-traces.size():0;i<traceCount;++i){const auto& t=traces[i%traces.size()];
@@ -406,7 +418,7 @@ static void updateUi() {
     const wchar_t* acTitle=manageAC?L"Plugged-in control: ON":L"Plugged-in control: OFF";
     wchar_t acOld[64];GetWindowTextW(GetDlgItem(window,AcButton),acOld,64);
     if(wcscmp(acOld,acTitle)){SetWindowTextW(GetDlgItem(window,AcButton),acTitle);InvalidateRect(GetDlgItem(window,AcButton),nullptr,FALSE);}
-    const wchar_t* schedulerTitle=schedulerGuard.enabled()?L"Scheduler guard: ON":L"Scheduler guard: OFF";
+    const wchar_t* schedulerTitle=placementController.enabled?L"Adaptive scheduler: ON":L"Adaptive scheduler: OFF";
     wchar_t schedulerOld[64]{};GetWindowTextW(GetDlgItem(window,SchedulerButton),schedulerOld,64);
     if(wcscmp(schedulerOld,schedulerTitle)){SetWindowTextW(GetDlgItem(window,SchedulerButton),schedulerTitle);InvalidateRect(GetDlgItem(window,SchedulerButton),nullptr,FALSE);}
     const wchar_t* pauseTitle=armed?L"Pause & restore":L"Resume control";
@@ -415,17 +427,18 @@ static void updateUi() {
     EnableWindow(GetDlgItem(window,BoostButton),enabled&&!sample.blocked);
     int buttonMode=armed?(efficientOnly?2:1):0;
     if(buttonMode!=lastButtonMode){lastButtonMode=buttonMode;InvalidateRect(GetDlgItem(window,AutoButton),nullptr,FALSE);InvalidateRect(GetDlgItem(window,EcoButton),nullptr,FALSE);}
-    updateTray();
+    updatePages();updateTray();
 }
 static HFONT font(int height,int weight) {return CreateFontW(-px(height),0,0,0,weight,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");}
 static HWND label(const wchar_t* text,int x,int y,int w,int h,HFONT f) {
-    HWND c=CreateWindowExW(0,L"STATIC",text,WS_CHILD|WS_VISIBLE|SS_LEFT,px(x),px(y),px(w),px(h),window,nullptr,nullptr,nullptr);
+    HWND c=CreateWindowExW(0,L"STATIC",text,WS_CHILD|WS_VISIBLE|SS_LEFT|SS_NOPREFIX,px(x),px(y),px(w),px(h),window,nullptr,nullptr,nullptr);
     SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(f),FALSE);labels.push_back(c);return c;
 }
 static void button(int id,const wchar_t* text,int x,int y,int w,int h) {
     HWND c=CreateWindowExW(0,L"BUTTON",text,WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,px(x),px(y),px(w),px(h),window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),nullptr,nullptr);
     SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(regular),FALSE);
 }
+#include "controls_ui.inl"
 static void makeUi() {
     regular=font(15,FW_NORMAL);fontSmall=font(13,FW_NORMAL);heading=font(32,FW_SEMIBOLD);hero=font(34,FW_SEMIBOLD);bold=font(15,FW_SEMIBOLD);
     label(L"Pulse",92,27,200,46,heading); // 0
@@ -451,6 +464,7 @@ static void makeUi() {
     button(AcButton,L"Plugged-in control: OFF",428,510,344,36);
     button(AutoButton,L"Automatic",32,334,220,42);button(EcoButton,L"Keep efficient",269,334,220,42);button(PauseButton,L"Pause & restore",506,334,266,42);
     button(BoostButton,L"Boost now",32,654,167,42);button(ReportButton,L"Diagnostics",213,654,167,42);button(HelperButton,L"Open G Helper",394,654,180,42);button(ExitButton,L"Restore & exit",588,654,184,42);
+    makePages();showPage(currentPage);
 }
 static void rectangle(HDC dc,int x,int y,int w,int h,COLORREF color,int radius=14) {
     HBRUSH b=CreateSolidBrush(color);auto old=SelectObject(dc,b);auto pen=SelectObject(dc,GetStockObject(NULL_PEN));
@@ -459,15 +473,16 @@ static void rectangle(HDC dc,int x,int y,int w,int h,COLORREF color,int radius=1
 static void paint() {
     ++paintCount;
     PAINTSTRUCT ps;HDC dc=BeginPaint(window,&ps);RECT r;GetClientRect(window,&r);FillRect(dc,&r,backgroundBrush);
-    rectangle(dc,24,116,756,204,Card);rectangle(dc,24,390,370,116,Card);rectangle(dc,410,390,370,116,Card);
-    rectangle(dc,24,548,756,90,Card);
+    if(currentPage==0){rectangle(dc,24,116,756,204,Card);rectangle(dc,24,390,370,116,Card);rectangle(dc,410,390,370,116,Card);rectangle(dc,24,548,756,90,Card);}
+    else if(currentPage==1){rectangle(dc,24,232,370,332,Card);rectangle(dc,408,232,372,332,Card);}
+    else{rectangle(dc,24,232,756,172,Card);rectangle(dc,24,420,370,137,Card);rectangle(dc,408,420,372,137,Card);}
     DrawIconEx(dc,px(30),px(36),LoadIconW(GetModuleHandleW(nullptr),MAKEINTRESOURCEW(1)),px(48),px(48),0,nullptr,DI_NORMAL);
     EndPaint(window,&ps);
 }
 static void drawButton(DRAWITEMSTRUCT* item) {
     ++buttonPaintCount;
     FillRect(item->hDC,&item->rcItem,backgroundBrush);
-    bool selected=(item->CtlID==AutoButton&&armed&&!efficientOnly)||(item->CtlID==EcoButton&&armed&&efficientOnly)||(item->CtlID==AcButton&&manageAC)||(item->CtlID==SchedulerButton&&schedulerGuard.enabled());
+    bool selected=(item->CtlID==AutoButton&&armed&&!efficientOnly)||(item->CtlID==EcoButton&&armed&&efficientOnly)||(item->CtlID==AcButton&&manageAC)||((item->CtlID==SchedulerButton||item->CtlID==PlacementButton)&&placementController.enabled)||(item->CtlID>=PageHome&&item->CtlID<=PageUv&&int(item->CtlID-PageHome)==currentPage);
     COLORREF color=selected?Mint:Card;if(item->itemState&ODS_SELECTED)color=RGB(71,143,130);
     HBRUSH b=CreateSolidBrush(color);auto old=SelectObject(item->hDC,b);auto pen=SelectObject(item->hDC,GetStockObject(NULL_PEN));
     RoundRect(item->hDC,item->rcItem.left,item->rcItem.top,item->rcItem.right,item->rcItem.bottom,px(10),px(10));SelectObject(item->hDC,pen);SelectObject(item->hDC,old);DeleteObject(b);
@@ -541,15 +556,18 @@ static LRESULT CALLBACK procedure(HWND h,UINT m,WPARAM w,LPARAM l) {
     case WM_ERASEBKGND:return 1;
     case WM_PAINT:paint();return 0;
     case WM_DRAWITEM:drawButton(reinterpret_cast<DRAWITEMSTRUCT*>(l));return TRUE;
-    case WM_CTLCOLORSTATIC:{HDC dc=reinterpret_cast<HDC>(w);HWND c=reinterpret_cast<HWND>(l);
+    case WM_CTLCOLORBTN:case WM_CTLCOLORSTATIC:{HDC dc=reinterpret_cast<HDC>(w);HWND c=reinterpret_cast<HWND>(l);
         bool outside=labels.size()>14&&(c==labels[0]||c==labels[1]||c==labels[7]||c==labels[14]||(labels.size()>17&&(c==labels[16]||c==labels[17])));
-        SetTextColor(dc,Text);SetBkColor(dc,outside?Background:Card);SetBkMode(dc,OPAQUE);
+        if(currentPage!=0){RECT r{};GetWindowRect(c,&r);MapWindowPoints(nullptr,h,reinterpret_cast<POINT*>(&r),2);outside=r.top<px(232)||r.top>=px(currentPage==1?564:557);}
+        SetTextColor(dc,IsWindowEnabled(c)?Text:Muted);SetBkColor(dc,outside?Background:Card);SetBkMode(dc,OPAQUE);
         return reinterpret_cast<LRESULT>(outside?backgroundBrush:cardBrush);}
     case SchedulerRefreshMsg:
         schedulerRefreshQueued=false;
         if(schedulerGuard.enabled()&&schedulerTopologyDirty){schedulerGuard.refresh();schedulerTopologyDirty=false;}
+        if(placementController.enabled&&!dryRun)placementController.topology(scheduler::discoverTopology());
         schedulerEvent();updateUi();return 0;
-    case WM_DEVICECHANGE:if(w==DBT_DEVNODES_CHANGED)schedulerRefresh();break;
+    case WM_DEVICECHANGE:if(w==DBT_DEVNODES_CHANGED){schedulerRefresh();if(placementController.enabled&&!dryRun)placementController.topology(scheduler::discoverTopology());}break;
+    case WM_HSCROLL:{int id=GetDlgCtrlID(reinterpret_cast<HWND>(l));if(id==UvPSlider||id==UvESlider)setControlText(id==UvPSlider?UvP:UvE,std::to_wstring(SendMessageW(reinterpret_cast<HWND>(l),TBM_GETPOS,0,0)));return 0;}
     case WM_INPUT:rawKeyboard(l);return DefWindowProcW(h,m,w,l);
     case WM_TIMER:
         if(w==TickTimer)tick();else if(w==StopTimer)SendMessageW(h,QuitMsg,0,0);
@@ -560,7 +578,7 @@ static LRESULT CALLBACK procedure(HWND h,UINT m,WPARAM w,LPARAM l) {
         else if(enabled&&browserForeground&&GetTickCount64()-lastNav>3000&&inputAge()<1200) {lastNav=GetTickCount64();requestBurst(Signal::Navigation,L"Title navigation");}return 0;
     case WM_POWERBROADCAST:
         if(w==PBT_APMSUSPEND){suspended=true;powerEvent();}
-        else if(w==PBT_APMRESUMEAUTOMATIC||w==PBT_APMRESUMESUSPEND){suspended=false;previousCpu=previousForeground=0;schedulerRefresh();powerEvent();}
+        else if(w==PBT_APMRESUMEAUTOMATIC||w==PBT_APMRESUMESUSPEND){suspended=false;previousCpu=previousForeground=0;schedulerRefresh();if(placementController.enabled&&!dryRun)placementController.topology(scheduler::discoverTopology());powerEvent();}
         else if(w==PBT_APMPOWERSTATUSCHANGE)powerEvent();
         else if(w==PBT_POWERSETTINGCHANGE){auto* p=reinterpret_cast<POWERBROADCAST_SETTING*>(l);
             if(p->PowerSetting==GUID_CONSOLE_DISPLAY_STATE&&p->DataLength==sizeof(DWORD)){DWORD value;memcpy(&value,p->Data,sizeof(value));displayOff=value==0;powerEvent();}
@@ -585,22 +603,31 @@ static LRESULT CALLBACK procedure(HWND h,UINT m,WPARAM w,LPARAM l) {
     case WM_DESTROY:PostQuitMessage(0);return 0;
     case WM_SIZE:if(w==SIZE_MINIMIZED){ShowWindow(h,SW_HIDE);setTimer();}return 0;
     case WM_DPICHANGED:{uiScale=HIWORD(w)/96.0;auto r=reinterpret_cast<RECT*>(l);SetWindowPos(h,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);
+        const auto drafts=capturePageDrafts();
+        destroyPages();
         for(auto c:labels)DestroyWindow(c);labels.clear();for(int id=101;id<=110;++id)DestroyWindow(GetDlgItem(h,id));
-        DeleteObject(regular);DeleteObject(fontSmall);DeleteObject(heading);DeleteObject(hero);DeleteObject(bold);makeUi();updateUi();return 0;}
+        DeleteObject(regular);DeleteObject(fontSmall);DeleteObject(heading);DeleteObject(hero);DeleteObject(bold);makeUi();restorePageDrafts(drafts);updateUi();return 0;}
     case TrayMsg:if(l==WM_LBUTTONUP||l==WM_LBUTTONDBLCLK)showWindow();else if(l==WM_RBUTTONUP)trayMenu();return 0;
     case WM_COMMAND:
         switch(LOWORD(w)) {
+        case PageHome:case PagePower:case PageUv:showPage(LOWORD(w)-PageHome);updateUi();break;
+        case ProfileApply:applyProfilesUi();break;
+        case ProfileReset:{const auto old=power.profiles;power.profiles=Profiles{};populateProfiles();power.profiles=old;profileMessage=L"Defaults loaded into the form. Press Apply to use them.";updatePages();break;}
+        case UvRefresh:refreshUv();break;
+        case UvP:case UvE:if(HIWORD(w)==EN_CHANGE){int value=0;if(undervolt::parseOffset(controlText(LOWORD(w)),value))SendDlgItemMessageW(h,LOWORD(w)==UvP?UvPSlider:UvESlider,TBM_SETPOS,TRUE,value);}break;
+        case UvApply:case UvMonitor:refreshUv();break;
         case EfficiencyButton:if(HIWORD(w)==BN_CLICKED)efficiencyMenu();break;
         case AutoButton:efficientOnly=false;turnOn();updateUi();break;
         case EcoButton:efficientOnly=true;turnOn();if(enabled&&(policy.burst||compute.active)){policy.reset(GetTickCount64());compute.reset();applyState();}updateUi();break;
         case PauseButton:if(armed)turnOff(false);else turnOn();break;
-        case SchedulerButton:{
+        case PlacementButton:case SchedulerButton:{
             if(HIWORD(w)!=BN_CLICKED)break;
-            const bool next=!schedulerGuard.enabled();
-            if(!scheduler::saveSchedulerPreference(schedulerIni(),next)){logEvent(L"Could not save scheduler preference");break;}
-            schedulerGuard.enabled(next);
-            if(next&&schedulerTopologyDirty)schedulerRefresh();
-            schedulerEvent();updateUi();break;}
+            const bool next=!placementController.enabled;
+            if(next&&!dryRun){const DWORD recovery=placement::recover(appFolder());if(recovery){profileMessage=L"Scheduler recovery failed (Windows "+std::to_wstring(recovery)+L"). New placements remain off.";logEvent(profileMessage);updateUi();break;}}
+            if(!WritePrivateProfileStringW(L"Preferences",L"PlacementEnabled",next?L"1":L"0",schedulerIni().c_str())){logEvent(L"Could not save scheduler preference");break;}
+            placementController.enabled=next;
+            if(next&&!dryRun)placementController.topology(scheduler::discoverTopology());else placementController.release();
+            schedulerEvent();setTimer();updateUi();break;}
         case AcButton:{
             bool next=!manageAC;
             if(!WritePrivateProfileStringW(L"Preferences",L"ManageAC",next?L"1":L"0",(appFolder()+L"\\Pulse.ini").c_str())){logEvent(L"Could not save plugged-in preference");break;}
@@ -620,9 +647,11 @@ static int guardMain(DWORD parent) {
     WaitForSingleObject(process,INFINITE);CloseHandle(process);
     HANDLE mutex=CreateMutexW(nullptr,FALSE,L"Local\\Pulse.Power.Controller.v1");if(!mutex)return 3;
     DWORD wait=WaitForSingleObject(mutex,10000);if(wait!=WAIT_OBJECT_0&&wait!=WAIT_ABANDONED){CloseHandle(mutex);return 0;}
-    DWORD e=power.restore(parent);ReleaseMutex(mutex);CloseHandle(mutex);return static_cast<int>(e);
+    DWORD placementError=placement::recover(appFolder(),parent);DWORD e=power.restore(parent);ReleaseMutex(mutex);CloseHandle(mutex);return static_cast<int>(e?e:placementError);
 }
 static int exercise(const std::wstring& output) {
+    // Exercise non-default targets so journal recovery cannot rely on constants.
+    power.profiles.ac.cores=23;power.profiles.ac.minimum=37;power.profiles.dc.cores=19;power.profiles.dc.minimum=21;
     std::wostringstream report;report<<L"Power integration exercise\nBEFORE\n"<<power.report();
     DWORD e=guardian();if(!e)e=power.restore();if(!e)e=power.capture();if(!e)e=power.configure();
     report<<L"\nConfigure result: "<<e<<L"\n";
@@ -639,7 +668,7 @@ static int schedulerGuiTest(HINSTANCE instance,const std::wstring& output) {
     dryRun=true;autoStart=false;armed=enabled=false;
     schedulerTestIni=appFolder()+L"\\scheduler-ui-test-"+std::to_wstring(GetCurrentProcessId())+L".ini";
     schedulerGuard.enabled(scheduler::loadSchedulerPreference(schedulerIni()));
-    const bool defaultOff=!schedulerGuard.enabled();
+    const bool defaultOff=!placementController.enabled;
     schedulerGuard.refresh();schedulerTopologyDirty=false;
     backgroundBrush=CreateSolidBrush(Background);cardBrush=CreateSolidBrush(Card);
     WNDCLASSEXW wc{sizeof(wc)};wc.lpfnWndProc=procedure;wc.hInstance=instance;wc.lpszClassName=L"PulseSchedulerTestOnly";
@@ -649,11 +678,11 @@ static int schedulerGuiTest(HINSTANCE instance,const std::wstring& output) {
     makeUi();updateUi();
     HWND button=GetDlgItem(window,SchedulerButton);
     SendMessageW(window,WM_COMMAND,MAKEWPARAM(SchedulerButton,BN_CLICKED),reinterpret_cast<LPARAM>(button));
-    const bool on=schedulerGuard.enabled()&&scheduler::loadSchedulerPreference(schedulerIni());
-    wchar_t title[64]{};GetWindowTextW(button,title,64);const bool onText=wcscmp(title,L"Scheduler guard: ON")==0;
+    const bool on=placementController.enabled&&GetPrivateProfileIntW(L"Preferences",L"PlacementEnabled",0,schedulerIni().c_str())==1;
+    wchar_t title[64]{};GetWindowTextW(button,title,64);const bool onText=wcscmp(title,L"Adaptive scheduler: ON")==0;
     SendMessageW(window,WM_COMMAND,MAKEWPARAM(SchedulerButton,BN_CLICKED),reinterpret_cast<LPARAM>(button));
-    const bool off=!schedulerGuard.enabled()&&!scheduler::loadSchedulerPreference(schedulerIni());
-    GetWindowTextW(button,title,64);const bool offText=wcscmp(title,L"Scheduler guard: OFF")==0;
+    const bool off=!placementController.enabled&&GetPrivateProfileIntW(L"Preferences",L"PlacementEnabled",1,schedulerIni().c_str())==0;
+    GetWindowTextW(button,title,64);const bool offText=wcscmp(title,L"Adaptive scheduler: OFF")==0;
     RECT left{},right{};GetWindowRect(button,&left);GetWindowRect(GetDlgItem(window,AcButton),&right);
     const bool layout=left.right<right.left&&left.bottom==right.bottom;
     const bool noPowerWrites=power.writes==0&&!enabled&&!armed;
@@ -662,13 +691,21 @@ static int schedulerGuiTest(HINSTANCE instance,const std::wstring& output) {
     GetWindowRect(labels[7],&statusRect);
     const bool efficiencyDefault=!efficiencyOptions.selected(efficiency::Option::Update)&&!efficiencyOptions.selected(efficiency::Option::Realtime);
     const bool efficiencyLayout=efficiencyRect.top>=statusRect.bottom&&labels.size()==18;
+    SendMessageW(window,WM_COMMAND,PagePower,0);
+    const bool powerPage=currentPage==1&&GetDlgItem(window,AcBase)&&GetDlgItem(window,DcBase+6);
+    setControlText(AcBase+1,L"101");const auto draft=capturePageDrafts();populateProfiles();restorePageDrafts(draft);
+    const bool invalidRejected=controlText(AcBase+1)==L"101"&&!applyProfilesUi();populateProfiles();
+    const bool previewValidated=applyProfilesUi()&&power.writes==0;
+    SendMessageW(window,WM_COMMAND,PageUv,0);
+    const bool uvPage=currentPage==2&&GetDlgItem(window,UvPSlider)&&GetDlgItem(window,UvESlider)&&!IsWindowEnabled(GetDlgItem(window,UvApply))&&!IsWindowEnabled(GetDlgItem(window,UvMonitor));
+    SendMessageW(window,WM_COMMAND,PageHome,0);
     std::wostringstream report;report<<L"defaultOff="<<defaultOff<<L" offPersisted="<<off<<L" offText="<<offText
       <<L" onPersisted="<<on<<L" onText="<<onText<<L" layout="<<layout<<L" noPowerWrites="<<noPowerWrites
-      <<L" efficiencyDefault="<<efficiencyDefault<<L" efficiencyLayout="<<efficiencyLayout<<L"\n"<<schedulerGuard.report();
+      <<L" efficiencyDefault="<<efficiencyDefault<<L" efficiencyLayout="<<efficiencyLayout<<L" powerPage="<<powerPage<<L" invalidRejected="<<invalidRejected<<L" previewValidated="<<previewValidated<<L" uvPage="<<uvPage<<L"\n"<<placementController.report();
     const bool saved=saveText(output,report.str());
     for(auto f:{regular,fontSmall,heading,hero,bold})DeleteObject(f);
     DeleteObject(backgroundBrush);DeleteObject(cardBrush);DestroyWindow(window);window=nullptr;
-    return defaultOff&&off&&offText&&on&&onText&&layout&&noPowerWrites&&efficiencyDefault&&efficiencyLayout&&saved?0:4;
+    return defaultOff&&off&&offText&&on&&onText&&layout&&noPowerWrites&&efficiencyDefault&&efficiencyLayout&&powerPage&&invalidRejected&&previewValidated&&uvPage&&saved?0:4;
 }
 static int efficiencyPreview(HINSTANCE instance) {
     dryRun=true;autoStart=false;armed=enabled=false;
@@ -684,7 +721,7 @@ static int efficiencyPreview(HINSTANCE instance) {
     window=CreateWindowExW(0,wc.lpszClassName,L"Pulse — Efficiency options preview (no system writes)",style,CW_USEDEFAULT,CW_USEDEFAULT,size.right-size.left,size.bottom-size.top,nullptr,nullptr,instance,nullptr);
     if(!window)return 3;
     makeUi();updateUi();ShowWindow(window,SW_SHOW);
-    SetTimer(window,StopTimer,120000,nullptr);
+    SetTimer(window,StopTimer,300000,nullptr);
     MSG message;while(GetMessageW(&message,nullptr,0,0)>0){TranslateMessage(&message);DispatchMessageW(&message);}
     return 0;
 }
@@ -694,6 +731,8 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int) {
     std::vector<std::wstring> args;for(int i=1;i<argc;++i)args.emplace_back(argv[i]);LocalFree(argv);
     auto has=[&](const wchar_t* a){return std::find(args.begin(),args.end(),a)!=args.end();};
     auto value=[&](const wchar_t* a)->std::wstring{auto p=std::find(args.begin(),args.end(),a);return p!=args.end()&&++p!=args.end()?*p:L"";};
+    power.profiles=loadProfiles(appFolder()+L"\\Pulse.ini");
+    if(has(L"--placement-exercise"))return placement::exercise(value(L"--placement-exercise"));
     if(has(L"--efficiency-helper"))return efficiency::helper(value(L"--efficiency-helper"),wcstoul(value(L"--parent").c_str(),nullptr,10),reinterpret_cast<HWND>(_wcstoui64(value(L"--owner").c_str(),nullptr,10)));
     if(has(L"--efficiency-diagnose"))return efficiency::diagnose(value(L"--efficiency-diagnose"));
     if(has(L"--efficiency-exercise"))return efficiency::exercise(value(L"--efficiency-exercise"));
@@ -718,8 +757,12 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int) {
     HANDLE singleton=CreateMutexW(nullptr,FALSE,L"Local\\Pulse.Power.Controller.v1");if(!singleton)return 2;
     DWORD wait=WaitForSingleObject(singleton,0);
     if(wait!=WAIT_OBJECT_0&&wait!=WAIT_ABANDONED) {HWND h=FindWindowW(ClassName,nullptr);if(h){ShowWindow(h,SW_SHOW);SetForegroundWindow(h);}CloseHandle(singleton);return 0;}
-    if(has(L"--restore")){int e=static_cast<int>(power.restore());ReleaseMutex(singleton);CloseHandle(singleton);return e;}
+    if(has(L"--restore")){DWORD p=placement::recover(appFolder());int e=static_cast<int>(power.restore());ReleaseMutex(singleton);CloseHandle(singleton);return e?e:static_cast<int>(p);}
     if(has(L"--exercise")){int e=exercise(value(L"--exercise"));ReleaseMutex(singleton);CloseHandle(singleton);return e;}
+    DWORD placementRecovery=placement::recover(appFolder());
+    if(placementRecovery)profileMessage=L"Scheduler recovery needs attention (Windows "+std::to_wstring(placementRecovery)+L"). New placements are off.";
+    placementController.enabled=!placementRecovery&&GetPrivateProfileIntW(L"Preferences",L"PlacementEnabled",0,(appFolder()+L"\\Pulse.ini").c_str())!=0;
+    if(placementController.enabled)placementController.topology(scheduler::discoverTopology());
     schedulerGuard.enabled(scheduler::loadSchedulerPreference(schedulerIni()));
     if(schedulerGuard.enabled()){schedulerGuard.refresh();schedulerTopologyDirty=false;}
     manageAC=GetPrivateProfileIntW(L"Preferences",L"ManageAC",0,(appFolder()+L"\\Pulse.ini").c_str())!=0;
@@ -727,7 +770,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int) {
     wchar_t computeApps[4096];GetPrivateProfileStringW(L"Preferences",L"ComputeApps",L"",computeApps,4096,(appFolder()+L"\\Pulse.ini").c_str());processMonitor.configure(computeApps);
     dryRun=has(L"--dry-run");reportOnExit=value(L"--report");autoStart=!has(L"--paused");
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_STANDARD_CLASSES};InitCommonControlsEx(&controls);
+    CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_STANDARD_CLASSES|ICC_BAR_CLASSES};InitCommonControlsEx(&controls);
     // Ask Windows to ignore this process for timer-resolution requests made elsewhere.
     PROCESS_POWER_THROTTLING_STATE throttling{PROCESS_POWER_THROTTLING_CURRENT_VERSION,PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION};
     SetProcessInformation(GetCurrentProcess(),ProcessPowerThrottling,&throttling,sizeof(throttling));

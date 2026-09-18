@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.0-controls-preview — local patch, 2026-09-18
+
+- Add three native pages and editable AC/DC core-parking, minimum-processor-state and heterogeneous/thread scheduling policies matching the supplied ParkControl controls.
+- Persist explicit baseline Apply with readback and rollback; record exact configurable targets in recovery journal v3 and retain v1/v2 recovery compatibility.
+- Add default-OFF adaptive placement for conservatively eligible, below-normal-priority background threads, using measured CPU time and reversible Windows CPU Sets.
+- Reuse the existing timer, bound discovery/admission and journal ownership before writes; release on demand/foreground events and preserve different external selections during recovery.
+- Add CPU identity and undervolt capability UI. Separate P/E values remain drafts: Apply and periodic reapplication are disabled pending a verified backend, readback and ownership.
+- Validate nine native suites, real power-state restoration, own-thread CPU-set recovery and isolated background-demand release. No battery gain or working undervolt actuator is claimed. Existing efficiency controls and G Helper hardware settings are unchanged by this patch.
+
 ## 1.3.0-efficiency-preview — 2026-09-17
 
 - Add the independently checkable **Efficiency options** dropdown for Windows Update service control and Defender real-time preference control; both OFF by default with remembered selections.

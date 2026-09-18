@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include "workload.h"
+#include "profile_config.h"
 #include <string>
 #include <vector>
 
@@ -12,9 +13,9 @@ std::wstring errorText(DWORD code);
 uint64_t fileTimeValue(const FILETIME& time);
 struct Setting { GUID id; const wchar_t* name; DWORD ac, dc; bool dynamic; };
 const std::vector<Setting>& settings();
-struct Row { GUID scheme; DWORD setting, ac, dc, mask; };
+struct Row { GUID scheme; DWORD setting, ac, dc, mask, targetAc, targetDc; };
 struct Snapshot {
-    DWORD magic = 0x50554C53, version = 2, owner = 0, count = 0;
+    DWORD magic = 0x50554C53, version = 3, owner = 0, count = 0;
     GUID scheme{}, acMode{}, dcMode{};
     Row rows[48]{};
     DWORD checksum = 0;
@@ -30,6 +31,8 @@ public:
     DWORD read(const GUID& scheme, DWORD index, bool ac, DWORD& value) const;
     DWORD capture(DWORD sourceMask = 3);
     DWORD configure();
+    DWORD persistProfiles();
+    Profiles profiles;
     DWORD apply(PowerState state);
     DWORD apply(bool burst) { return apply(burst?PowerState::Burst:PowerState::Efficiency); }
     DWORD verify(PowerState state, bool full = false) const;
