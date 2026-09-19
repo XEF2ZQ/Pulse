@@ -47,6 +47,8 @@ Before selecting CPU sets, Pulse writes a bounded, checksummed, atomic journal c
 
 ## Why the undervolt controls cannot apply yet
 
+The follow-up [firmware investigation](undervolt-investigation.md) records the approved twelve-core probe, actual SMU response, conflicting upstream assumptions, and the remaining requirements. Administrator access succeeded; verified offset readback did not.
+
 CPU identification reads CPUID vendor, brand, family, model and stepping. The capability check also reports whether a PawnIO service exists. Neither proves that firmware is unlocked, that separate P/E domains are writable, or that actual hardware offsets can be read back. This build reports the lock as **unverified**, not incorrectly locked or unlocked based on a model-name list.
 
 The two fields/sliders are drafts. AMD labels use **Curve Optimizer steps**, not millivolts; Intel labels use mV. The draft range is not a recommended or validated hardware range. Apply and periodic reapplication remain disabled on every CPU in this build. No undervolting driver, mailbox/MSR writer or background verification timer is installed. G Helper keeps its existing Curve Optimizer configuration.
