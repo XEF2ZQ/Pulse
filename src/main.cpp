@@ -270,7 +270,7 @@ static void turnOn() {
     if(!dryRun) {
         DWORD e=guardian();if(e){fail(e,L"Recovery companion could not start");return;}
         e=power.restore();if(e){fail(e,L"Previous settings could not be recovered");return;}
-        e=power.capture(sample.battery?2:1);if(e){fail(e,L"Original settings could not be saved");return;}
+        e=power.capture(sample.battery?2:1);if(e){fail(e,power.captureIssue.empty()?L"Original settings could not be saved":power.captureIssue);return;}
         e=power.configure();if(e==ERROR_RETRY){DWORD restored=power.restore();if(restored){fail(restored,L"Source change recovery failed");return;}PostMessageW(window,WM_POWERBROADCAST,PBT_APMPOWERSTATUSCHANGE,0);return;}if(e){fail(e,L"Windows did not accept the requested settings");return;}
     }
     enabled=true;environment();appliedOnBattery=sample.battery;policy.reset(sample.now);compute.reset();processMonitor.clear();lastComputeSample=0;previousAccounting=sample.now;

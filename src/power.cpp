@@ -110,6 +110,7 @@ DWORD Power::loadJournal(Snapshot& out)const {
     return 0;
 }
 DWORD Power::capture(DWORD sourceMask) {
+    captureIssue.clear();
     if(sourceMask<1||sourceMask>3)return ERROR_INVALID_PARAMETER;
     if(hasJournal())return ERROR_ALREADY_EXISTS;
     if(!available())return ERROR_CALL_NOT_IMPLEMENTED;
@@ -118,8 +119,13 @@ DWORD Power::capture(DWORD sourceMask) {
     for(const GUID& scheme:{saved.scheme,GUID_POWER_MODE_BEST_EFFICIENCY,GUID_POWER_MODE_BEST_PERFORMANCE}) {
         for(DWORD i=0;i<settings().size();++i) {
             Row r{scheme,i,0,0,explicitMask(scheme,i),profiles.value(i,true),profiles.value(i,false)};
-            if(!r.mask){if(scheme==saved.scheme&&i!=2&&i!=4)return ERROR_NOT_SUPPORTED;continue;}
-            if(scheme==saved.scheme&&r.mask!=3)return ERROR_NOT_SUPPORTED;
+            if(!r.mask&&!(scheme==saved.scheme&&i!=2&&i!=4))continue;
+            if(scheme==saved.scheme&&r.mask!=3) {
+                // Inherited values cannot be restored exactly by the v3 journal.
+                // Do not materialize overrides or silently replace the user's plan.
+                captureIssue=L"This power plan has inherited settings Pulse cannot safely restore. Select Balanced in Windows, then click Automatic.";
+                return ERROR_NOT_SUPPORTED;
+            }
             auto a=read(scheme,i,true,r.ac),d=read(scheme,i,false,r.dc);
             if(a||d) { if(scheme==saved.scheme)return a?a:d; if(a==ERROR_FILE_NOT_FOUND&&d==ERROR_FILE_NOT_FOUND)continue; return a?a:d; }
             r.mask &= sourceMask; if(!r.mask)continue;

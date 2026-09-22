@@ -30,6 +30,7 @@ public:
     DWORD activeScheme(GUID& out) const;
     DWORD read(const GUID& scheme, DWORD index, bool ac, DWORD& value) const;
     DWORD capture(DWORD sourceMask = 3);
+    std::wstring captureIssue;
     DWORD configure();
     DWORD persistProfiles();
     Profiles profiles;
