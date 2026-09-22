@@ -1,5 +1,5 @@
-// Research diagnostic only: fixed candidate Strix CO getter, no offset setter.
-// An accepted command or an in-range number is NOT verified offset readback.
+// Research diagnostic only: fixed voltage-curve queries, no offset setter.
+// Firmware 0x0B5D0B00 disassembly shows 0xAF is NOT an offset getter.
 #include "scheduler_topology.h"
 #include <cstring>
 #include <filesystem>
@@ -57,7 +57,7 @@ int wmain(int argc, wchar_t **argv) {
   std::ofstream out{std::filesystem::path(argv[2])};
   if (!out)
     return 3;
-  out << "Pulse Strix candidate CO readback probe; no offset setter\n";
+  out << "Pulse Strix voltage-curve diagnostic; no offset setter\n";
   int r[4]{};
   __cpuid(r, 0);
   char vendor[13]{};
@@ -183,9 +183,12 @@ int wmain(int argc, wchar_t **argv) {
         execute(device, "ioctl_get_smu_version", nullptr, 0, result, 1, &count);
     out << "smu_version=0x" << std::hex << result[0] << " hr=0x"
         << static_cast<unsigned>(hr) << std::dec << "\n";
-    okay = SUCCEEDED(hr) && count == 1;
+    okay = SUCCEEDED(hr) && count == 1 && result[0] == 0x0B5D0B00;
   }
-  bool plausible = okay;
+  if (!okay) {
+    out << "Firmware identity mismatch; no curve queries\n";
+    return 21;
+  }
   // Use the reverse-engineered upstream Strix RSMU mailbox explicitly.
   // Different signed module revisions may route their generic command helper
   // differently.
@@ -201,7 +204,10 @@ int wmain(int argc, wchar_t **argv) {
     return SUCCEEDED(
         execute(device, "ioctl_write_smu_register", input, 2, nullptr, 0, &n));
   };
-  auto readMargin = [&](unsigned core, ULONG64(&values)[6]) {
+  auto readCurve = [&](unsigned message, unsigned argument,
+                       ULONG64(&values)[6]) {
+    if (message != 0xAF && message != 0xC3)
+      return false;
     constexpr ULONG64 command = 0x03B10A20, response = 0x03B10A80,
                       arguments = 0x03B10A88;
     ULONG64 state = 0;
@@ -216,9 +222,17 @@ int wmain(int argc, wchar_t **argv) {
     if (!state || !writeRegister(response, 0))
       return false;
     for (unsigned i = 0; i < 6; ++i)
-      if (!writeRegister(arguments + 4 * i, i ? 0 : core))
+      if (!writeRegister(arguments + 4 * i, i ? 0 : argument))
         return false;
-    if (!writeRegister(command, 0xAF))
+    // Verify request arguments before issuing a query, catching transport
+    // mixups.
+    for (unsigned i = 0; i < 6; ++i) {
+      ULONG64 actual = 0;
+      if (!readRegister(arguments + 4 * i, actual) ||
+          actual != (i ? 0 : argument))
+        return false;
+    }
+    if (!writeRegister(command, message))
       return false;
     start = GetTickCount64();
     state = 0;
@@ -232,6 +246,9 @@ int wmain(int argc, wchar_t **argv) {
     out << "raw_mailbox_status=" << state << " ";
     if (state != 1)
       return false;
+    ULONG64 actualCommand = 0;
+    if (!readRegister(command, actualCommand) || actualCommand != message)
+      return false;
     for (unsigned i = 0; i < 6; ++i)
       if (!readRegister(arguments + 4 * i, values[i]))
         return false;
@@ -240,27 +257,35 @@ int wmain(int argc, wchar_t **argv) {
   for (const auto &[core, cls] : physical) {
     if (!okay)
       break;
-    count = 0;
-    memset(result, 0, sizeof(result));
-    hr = readMargin(core, result) ? S_OK : E_FAIL;
-    count = SUCCEEDED(hr) ? 6 : 0;
-    const unsigned low = static_cast<unsigned>(result[0] & 0xFFFF);
-    const int offset =
-        low >= 0x8000 ? static_cast<int>(low) - 0x10000 : static_cast<int>(low);
-    out << "core=" << core << " class=" << cls << " hr=0x" << std::hex
-        << static_cast<unsigned>(hr) << " raw=0x" << result[0] << std::dec
-        << " count=" << count << " candidate_signed_low16=" << offset << "\n";
-    out.flush();
-    out << "all_arguments=";
-    for (auto word : result)
-      out << " 0x" << std::hex << word;
-    out << std::dec << "\n";
-    okay = SUCCEEDED(hr) && count == 6;
-    plausible = plausible && okay && offset >= -250 && offset <= 0;
+    // These query selectors differ from the setter: complex in [31:28],
+    // slot in [27:24], temperature in [23:16], curve input in [15:0].
+    // CPUID-to-complex correspondence is still under investigation.
+    const unsigned selector = ((core / 8) << 28) | ((core % 8) << 24);
+    for (const auto &query : {std::pair{0xAFu, 0u},
+                              {0xAFu, 1000u},
+                              {0xAFu, 3000u},
+                              {0xC3u, 800u},
+                              {0xC3u, 1000u}}) {
+      if (!okay)
+        break;
+      count = 0;
+      memset(result, 0, sizeof(result));
+      const unsigned argument = selector | query.second;
+      hr = readCurve(query.first, argument, result) ? S_OK : E_FAIL;
+      count = SUCCEEDED(hr) ? 6 : 0;
+      out << "core=" << core << " class=" << cls << " hr=0x" << std::hex
+          << static_cast<unsigned>(hr) << " command=0x" << query.first
+          << " argument=0x" << argument << " raw=0x" << result[0] << std::dec
+          << " count=" << count << " curve_result=" << result[0] << "\n";
+      out.flush();
+      out << "all_arguments=";
+      for (auto word : result)
+        out << " 0x" << std::hex << word;
+      out << std::dec << "\n";
+      okay = SUCCEEDED(hr) && count == 6;
+    }
   }
-  out << "transport_complete=" << okay
-      << "\ncandidate_range_check=" << plausible
-      << "\nsemantic_readback_verified=0\n";
+  out << "transport_complete=" << okay << "\nsemantic_readback_verified=0\n";
   // This research tool cannot establish selector identity or offset semantics.
   // Never let plausible-looking data qualify a production undervolt backend.
   return 20;
