@@ -1,5 +1,12 @@
 # Architecture
 
+The 1.4.1 [CPU options patch](cpu-options.md) adds explicit opt-in Windows EPP,
+boost-disable and idle-policy preferences through the existing power writer and
+source-specific journal. Register-level Intel/AMD controls remain unavailable;
+CPUID feature detection is not evidence of writable hardware. No new sampler is
+introduced. The boost-disable option takes precedence over Burst/Compute boost
+indices without replacing their Windows-mode arbitration.
+
 The 1.3 [Efficiency options subsystem](efficiency-options.md) adds independent Update/Defender preference controls with an optional administrator broker. The CPU power-controller architecture below remains unchanged; the new subsystem has its own ownership, event subscriptions, persistence and recovery journal.
 
 ## Responsibility and scope

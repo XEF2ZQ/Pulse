@@ -404,7 +404,7 @@ static void updateUi() {
     setLabel(3,!fault.empty()?L"Control paused":!enabled?(armed?L"Ready for battery.":L"Your settings restored"):compute.active?L"Room to finish the job.":policy.burst?L"A little more momentum.":L"Quietly efficient.");
     setLabel(4,!fault.empty()?fault:!enabled?(armed?L"Plugged-in control is off. Windows keeps your restored settings.":L"Resume when you want Pulse to manage responsiveness."):efficientOnly?L"Efficiency stays on until you choose Automatic.":compute.active?L"Sustained computation detected. Efficiency returns when CPU work settles.":policy.reason);
     setLabel(5,!enabled?L"WINDOWS  /  restored":state()==PowerState::Burst?L"WINDOWS  /  best performance":compute.active?L"WINDOWS  /  best performance":L"WINDOWS  /  best power efficiency");
-    setLabel(6,!enabled?L"CPU BOOST  /  restored":state()==PowerState::Burst?L"CPU BOOST  /  aggressive":compute.active?L"CPU BOOST  /  efficient aggressive":L"CPU BOOST  /  disabled");
+    setLabel(6,!enabled?L"CPU BOOST  /  restored":power.cpuOptions.boostDisabled(!sample.battery)?L"CPU BOOST  /  disabled by option":state()==PowerState::Burst?L"CPU BOOST  /  aggressive":compute.active?L"CPU BOOST  /  efficient aggressive":L"CPU BOOST  /  disabled");
     SYSTEM_POWER_STATUS s{};GetSystemPowerStatus(&s);
     setLabel(7,std::wstring(s.ACLineStatus==1?L"PLUGGED IN":L"ON BATTERY")+(s.BatteryLifePercent<=100?L"  ·  "+std::to_wstring(s.BatteryLifePercent)+L"%":L""));
     setLabel(12,L"Short boosts  "+std::to_wstring(bursts)+L"     ·     Burst limit  "+(sample.battery?L"1.8 seconds":L"2.4 seconds"));
@@ -475,14 +475,16 @@ static void paint() {
     PAINTSTRUCT ps;HDC dc=BeginPaint(window,&ps);RECT r;GetClientRect(window,&r);FillRect(dc,&r,backgroundBrush);
     if(currentPage==0){rectangle(dc,24,116,756,204,Card);rectangle(dc,24,390,370,116,Card);rectangle(dc,410,390,370,116,Card);rectangle(dc,24,548,756,90,Card);}
     else if(currentPage==1){rectangle(dc,24,232,370,332,Card);rectangle(dc,408,232,372,332,Card);}
-    else{rectangle(dc,24,232,756,172,Card);rectangle(dc,24,420,370,137,Card);rectangle(dc,408,420,372,137,Card);}
+    else if(currentPage==2){rectangle(dc,24,232,756,172,Card);rectangle(dc,24,420,370,137,Card);rectangle(dc,408,420,372,137,Card);}
+    else if(currentPage==3){rectangle(dc,24,232,756,224,Card);rectangle(dc,24,584,756,200,Card);}
+    else{rectangle(dc,24,232,756,241,Card);rectangle(dc,24,482,756,152,Card);}
     DrawIconEx(dc,px(30),px(36),LoadIconW(GetModuleHandleW(nullptr),MAKEINTRESOURCEW(1)),px(48),px(48),0,nullptr,DI_NORMAL);
     EndPaint(window,&ps);
 }
 static void drawButton(DRAWITEMSTRUCT* item) {
     ++buttonPaintCount;
     FillRect(item->hDC,&item->rcItem,backgroundBrush);
-    bool selected=(item->CtlID==AutoButton&&armed&&!efficientOnly)||(item->CtlID==EcoButton&&armed&&efficientOnly)||(item->CtlID==AcButton&&manageAC)||((item->CtlID==SchedulerButton||item->CtlID==PlacementButton)&&placementController.enabled)||(item->CtlID>=PageHome&&item->CtlID<=PageUv&&int(item->CtlID-PageHome)==currentPage);
+    bool selected=(item->CtlID==AutoButton&&armed&&!efficientOnly)||(item->CtlID==EcoButton&&armed&&efficientOnly)||(item->CtlID==AcButton&&manageAC)||((item->CtlID==SchedulerButton||item->CtlID==PlacementButton)&&placementController.enabled)||(item->CtlID>=PageHome&&item->CtlID<=PageCpu&&int(item->CtlID-PageHome)==std::min(currentPage,3));
     COLORREF color=selected?Mint:Card;if(item->itemState&ODS_SELECTED)color=RGB(71,143,130);
     HBRUSH b=CreateSolidBrush(color);auto old=SelectObject(item->hDC,b);auto pen=SelectObject(item->hDC,GetStockObject(NULL_PEN));
     RoundRect(item->hDC,item->rcItem.left,item->rcItem.top,item->rcItem.right,item->rcItem.bottom,px(10),px(10));SelectObject(item->hDC,pen);SelectObject(item->hDC,old);DeleteObject(b);
@@ -610,7 +612,15 @@ static LRESULT CALLBACK procedure(HWND h,UINT m,WPARAM w,LPARAM l) {
     case TrayMsg:if(l==WM_LBUTTONUP||l==WM_LBUTTONDBLCLK)showWindow();else if(l==WM_RBUTTONUP)trayMenu();return 0;
     case WM_COMMAND:
         switch(LOWORD(w)) {
-        case PageHome:case PagePower:case PageUv:showPage(LOWORD(w)-PageHome);updateUi();break;
+        case PageHome:case PagePower:case PageUv:case PageCpu:showPage(LOWORD(w)-PageHome);updateUi();break;
+        case CpuApply:applyCpuUi();break;
+        case CpuRefresh:refreshCpu();break;
+        case CpuDefaults:populateCpu(cpu::Options{});setControlText(CpuStatus,L"Defaults loaded into this form. Press Apply to use them.");break;
+        case CpuVendor:if(HIWORD(w)==CBN_SELCHANGE)showCpuHardware();break;
+        case IdleOpen:refreshIdleSupport();showPage(4);break;
+        case IdleBack:showPage(3);break;
+        case IdleApply:applyIdleUi();break;
+        case IdleDefaults:populateIdle(cpu::Options{});setControlText(IdleStatus,L"Defaults loaded into this form. Press Apply to use them.");break;
         case ProfileApply:applyProfilesUi();break;
         case ProfileReset:{const auto old=power.profiles;power.profiles=Profiles{};populateProfiles();power.profiles=old;profileMessage=L"Defaults loaded into the form. Press Apply to use them.";updatePages();break;}
         case UvRefresh:refreshUv();break;
@@ -664,6 +674,58 @@ static int exercise(const std::wstring& output) {
     DWORD restore=power.restore();report<<L"Restore result: "<<restore<<L"\nAFTER\n"<<power.report();
     if(!saveText(output,report.str()))return ERROR_WRITE_FAULT;return static_cast<int>(e?e:restore);
 }
+static int cpuOptionsExercise(const std::wstring& output) {
+    // Manual integration check: no preference writes; guardian owns crash recovery.
+    std::wostringstream report;report<<L"CPU options policy exercise; hardware C-states not tested\n";
+    DWORD error=guardian();if(!error)error=power.restore();
+    const auto originalOptions=power.cpuOptions;
+    for(DWORD mask:{2u,1u}) {
+        if(error)break;
+        power.cpuOptions=cpu::Options{};
+        power.cpuOptions.epp=true;power.cpuOptions.idleThresholds=true;
+        power.cpuOptions.disableBoostAc=power.cpuOptions.disableBoostDc=true;
+        power.cpuOptions.acEpp=43;power.cpuOptions.dcEpp=73;
+        power.cpuOptions.acDemote=15;power.cpuOptions.dcDemote=35;
+        power.cpuOptions.acPromote=90;power.cpuOptions.dcPromote=70;
+        error=power.capture(mask);report<<L"Capture mask "<<mask<<L": "<<error<<L"\n";
+        if(error)break;
+        const auto snapshot=power.saved;
+        SYSTEM_POWER_STATUS source{};GetSystemPowerStatus(&source);
+        // apply() is intentionally refused for the inactive source. Configure
+        // still exercises static writes, followed immediately by restoration.
+        error=power.configure();
+        const bool inactive=!(mask&(source.ACLineStatus==1?1u:2u));
+        if(error==ERROR_RETRY&&inactive)error=0;
+        report<<L"Configure: "<<error<<L"; inactive source: "<<inactive<<L"\n";
+        for(DWORD i=0;i<snapshot.count&&!error;++i) {
+            const auto &row=snapshot.rows[i];
+            for(bool ac:{true,false}) {
+                DWORD value=0;error=power.read(row.scheme,row.setting,ac,value);if(error)break;
+                const DWORD target=(row.mask&(ac?1:2))?(ac?row.targetAc:row.targetDc):(ac?row.ac:row.dc);
+                if(value!=target){error=ERROR_INVALID_STATE;break;}
+            }
+        }
+        if(!error&&!inactive) {
+            error=power.apply(PowerState::Burst);if(!error)error=power.verify(PowerState::Burst,true);
+            if(!error)error=power.apply(PowerState::Compute);if(!error)error=power.verify(PowerState::Compute,true);
+        }
+        report<<L"Source isolation / boost-disable verification: "<<error<<L"\n";
+        const DWORD restored=power.restore();if(!error)error=restored;
+        for(DWORD i=0;i<snapshot.count&&!error;++i) {
+            const auto &row=snapshot.rows[i];
+            for(bool ac:{true,false}) {
+                DWORD value=0;error=power.read(row.scheme,row.setting,ac,value);if(error)break;
+                if(value!=(ac?row.ac:row.dc)){error=ERROR_INVALID_STATE;break;}
+            }
+        }
+        report<<L"Exact value restoration: "<<error<<L"; journal remains: "<<power.hasJournal()<<L"\n";
+    }
+    const DWORD restored=power.restore();if(!error)error=restored;
+    power.cpuOptions=originalOptions;
+    report<<L"Final result: "<<error<<L"\n"<<power.report();
+    if(!saveText(output,report.str()))return ERROR_WRITE_FAULT;
+    return static_cast<int>(error);
+}
 static int schedulerGuiTest(HINSTANCE instance,const std::wstring& output) {
     dryRun=true;autoStart=false;armed=enabled=false;
     schedulerTestIni=appFolder()+L"\\scheduler-ui-test-"+std::to_wstring(GetCurrentProcessId())+L".ini";
@@ -698,14 +760,26 @@ static int schedulerGuiTest(HINSTANCE instance,const std::wstring& output) {
     const bool previewValidated=applyProfilesUi()&&power.writes==0;
     SendMessageW(window,WM_COMMAND,PageUv,0);
     const bool uvPage=currentPage==2&&GetDlgItem(window,UvPSlider)&&GetDlgItem(window,UvESlider)&&!IsWindowEnabled(GetDlgItem(window,UvApply))&&!IsWindowEnabled(GetDlgItem(window,UvMonitor));
+    SendMessageW(window,WM_COMMAND,PageCpu,0);
+    const bool cpuPage=currentPage==3&&GetDlgItem(window,CpuEpp)&&!IsWindowEnabled(GetDlgItem(window,422));
+    setControlText(CpuDcEpp,L"101");const bool cpuReject=!applyCpuUi();populateCpu(power.cpuOptions);
+    const bool cpuPreview=applyCpuUi()&&power.writes==0;
+    const auto cpuDraft=capturePageDrafts();setControlText(CpuAcEpp,L"7");restorePageDrafts(cpuDraft);
+    const bool cpuDraftRestored=controlText(CpuAcEpp)==std::to_wstring(power.cpuOptions.acEpp);
+    SendMessageW(window,WM_COMMAND,IdleOpen,0);
+    setControlText(IdleDcDemote,L"101");const bool idleReject=currentPage==4&&!applyIdleUi();populateIdle(power.cpuOptions);
+    const bool idlePreview=applyIdleUi()&&power.writes==0;
+    RECT cpuTab{},effButton{};GetWindowRect(GetDlgItem(window,PageCpu),&cpuTab);GetWindowRect(GetDlgItem(window,EfficiencyButton),&effButton);
+    const bool cpuLayout=cpuTab.right<effButton.left;
     SendMessageW(window,WM_COMMAND,PageHome,0);
     std::wostringstream report;report<<L"defaultOff="<<defaultOff<<L" offPersisted="<<off<<L" offText="<<offText
       <<L" onPersisted="<<on<<L" onText="<<onText<<L" layout="<<layout<<L" noPowerWrites="<<noPowerWrites
-      <<L" efficiencyDefault="<<efficiencyDefault<<L" efficiencyLayout="<<efficiencyLayout<<L" powerPage="<<powerPage<<L" invalidRejected="<<invalidRejected<<L" previewValidated="<<previewValidated<<L" uvPage="<<uvPage<<L"\n"<<placementController.report();
+      <<L" efficiencyDefault="<<efficiencyDefault<<L" efficiencyLayout="<<efficiencyLayout<<L" powerPage="<<powerPage<<L" invalidRejected="<<invalidRejected<<L" previewValidated="<<previewValidated<<L" uvPage="<<uvPage
+      <<L" cpuPage="<<cpuPage<<L" cpuReject="<<cpuReject<<L" cpuPreview="<<cpuPreview<<L" cpuDraftRestored="<<cpuDraftRestored<<L" idleReject="<<idleReject<<L" idlePreview="<<idlePreview<<L" cpuLayout="<<cpuLayout<<L"\n"<<placementController.report();
     const bool saved=saveText(output,report.str());
     for(auto f:{regular,fontSmall,heading,hero,bold})DeleteObject(f);
     DeleteObject(backgroundBrush);DeleteObject(cardBrush);DestroyWindow(window);window=nullptr;
-    return defaultOff&&off&&offText&&on&&onText&&layout&&noPowerWrites&&efficiencyDefault&&efficiencyLayout&&powerPage&&invalidRejected&&previewValidated&&uvPage&&saved?0:4;
+    return defaultOff&&off&&offText&&on&&onText&&layout&&noPowerWrites&&efficiencyDefault&&efficiencyLayout&&powerPage&&invalidRejected&&previewValidated&&uvPage&&cpuPage&&cpuReject&&cpuPreview&&cpuDraftRestored&&idleReject&&idlePreview&&cpuLayout&&saved?0:4;
 }
 static int efficiencyPreview(HINSTANCE instance) {
     dryRun=true;autoStart=false;armed=enabled=false;
@@ -732,6 +806,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int) {
     auto has=[&](const wchar_t* a){return std::find(args.begin(),args.end(),a)!=args.end();};
     auto value=[&](const wchar_t* a)->std::wstring{auto p=std::find(args.begin(),args.end(),a);return p!=args.end()&&++p!=args.end()?*p:L"";};
     power.profiles=loadProfiles(appFolder()+L"\\Pulse.ini");
+    power.cpuOptions=cpu::load(appFolder()+L"\\Pulse.ini");
     if(has(L"--placement-exercise"))return placement::exercise(value(L"--placement-exercise"));
     if(has(L"--efficiency-helper"))return efficiency::helper(value(L"--efficiency-helper"),wcstoul(value(L"--parent").c_str(),nullptr,10),reinterpret_cast<HWND>(_wcstoui64(value(L"--owner").c_str(),nullptr,10)));
     if(has(L"--efficiency-diagnose"))return efficiency::diagnose(value(L"--efficiency-diagnose"));
@@ -759,6 +834,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int) {
     if(wait!=WAIT_OBJECT_0&&wait!=WAIT_ABANDONED) {HWND h=FindWindowW(ClassName,nullptr);if(h){ShowWindow(h,SW_SHOW);SetForegroundWindow(h);}CloseHandle(singleton);return 0;}
     if(has(L"--restore")){DWORD p=placement::recover(appFolder());int e=static_cast<int>(power.restore());ReleaseMutex(singleton);CloseHandle(singleton);return e?e:static_cast<int>(p);}
     if(has(L"--exercise")){int e=exercise(value(L"--exercise"));ReleaseMutex(singleton);CloseHandle(singleton);return e;}
+    if(has(L"--cpu-options-exercise")){int e=cpuOptionsExercise(value(L"--cpu-options-exercise"));ReleaseMutex(singleton);CloseHandle(singleton);return e;}
     DWORD placementRecovery=placement::recover(appFolder());
     if(placementRecovery)profileMessage=L"Scheduler recovery needs attention (Windows "+std::to_wstring(placementRecovery)+L"). New placements are off.";
     placementController.enabled=!placementRecovery&&GetPrivateProfileIntW(L"Preferences",L"PlacementEnabled",0,(appFolder()+L"\\Pulse.ini").c_str())!=0;

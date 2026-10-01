@@ -1,5 +1,7 @@
 # Validation
 
+For **1.4.1-cpu-options-preview**, see the dated [CPU options validation](cpu-options.md#validation--1-october-2026): ten CTest entries passed and a manual Windows-policy transaction verified source isolation, boost-disable precedence and restoration. Hardware C-state control and battery benefits were not validated. The older results below retain their original scope.
+
 For the current **1.2.0-demand-preview**, see [productive-demand patch validation](productive-demand-patch.md). Results below are the historical 1.0–1.1.2 baseline, not new-release claims.
 
 The separate [battery-tail diagnostic patch](power-tail-investigation.md) passed seven local native suites plus five offline analysis tests. It adds an opt-in recorder without changing the installed governor. Live component-power validation remains pending.

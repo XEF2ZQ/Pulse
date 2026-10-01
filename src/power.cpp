@@ -27,7 +27,12 @@ const std::vector<Setting>& settings() {
         {GUID_PROCESSOR_THROTTLE_MINIMUM_1,L"Class 1 minimum processor state",80,15,false},
         {GUID_PROCESSOR_HETEROGENEOUS_POLICY,L"Standard core parking",0,0,false},
         {GUID_PROCESSOR_THREAD_SCHEDULING_POLICY,L"Long threads (Automatic)",5,5,false},
-        {GUID_PROCESSOR_SHORT_THREAD_SCHEDULING_POLICY,L"Short threads (Automatic)",5,5,false}
+        {GUID_PROCESSOR_SHORT_THREAD_SCHEDULING_POLICY,L"Short threads (Automatic)",5,5,false},
+        {GUID_PROCESSOR_PERF_ENERGY_PERFORMANCE_PREFERENCE,L"Windows EPP",50,80,false},
+        {GUID_PROCESSOR_PERF_ENERGY_PERFORMANCE_PREFERENCE_1,L"Windows EPP class 1",50,80,false},
+        {GUID_PROCESSOR_IDLE_DEMOTE_THRESHOLD,L"Windows idle demotion threshold",12,40,false},
+        {GUID_PROCESSOR_IDLE_PROMOTE_THRESHOLD,L"Windows idle promotion threshold",100,60,false},
+        {GUID_PROCESSOR_IDLE_STATE_MAXIMUM,L"Windows idle state maximum",0,0,false}
     }; return list;
 }
 static std::wstring journalPath() { return appFolder()+L"\\state\\restore.bin"; }
@@ -88,7 +93,7 @@ DWORD Power::loadJournal(Snapshot& out)const {
     const DWORD size=GetFileSize(f,nullptr);
     bool ok=false;
     if(size==sizeof(out)) {
-        ok=ReadFile(f,&out,sizeof(out),&n,nullptr)&&n==sizeof(out)&&out.version==3&&out.checksum==checksum(out);
+        ok=ReadFile(f,&out,sizeof(out),&n,nullptr)&&n==sizeof(out)&&(out.version==3||out.version==4)&&out.checksum==checksum(out);
     } else if(size==sizeof(LegacySnapshot)) {
         LegacySnapshot old{};
         ok=ReadFile(f,&old,sizeof(old),&n,nullptr)&&n==sizeof(old)&&old.magic==0x50554C53&&
@@ -104,23 +109,45 @@ DWORD Power::loadJournal(Snapshot& out)const {
     CloseHandle(f);
     if(!ok||out.magic!=0x50554C53||out.count>48||out.count<6)return ERROR_INVALID_DATA;
     for(DWORD i=0;i<out.count;++i) {
-        const auto& r=out.rows[i]; if(r.setting>=settings().size()||r.ac>100||r.dc>100||r.targetAc>100||r.targetDc>100||r.mask<1||r.mask>3)return ERROR_INVALID_DATA;
+        const auto& r=out.rows[i]; if(r.setting>=settings().size()||(out.version<4&&r.setting>=8)||r.ac>100||r.dc>100||r.targetAc>100||r.targetDc>100||r.mask<1||r.mask>3)return ERROR_INVALID_DATA;
         if(r.scheme!=out.scheme&&r.scheme!=GUID_POWER_MODE_BEST_EFFICIENCY&&r.scheme!=GUID_POWER_MODE_BEST_PERFORMANCE)return ERROR_INVALID_DATA;
     }
     return 0;
 }
-DWORD Power::capture(DWORD sourceMask) {
+bool Power::optionAvailable(DWORD index, DWORD sourceMask) const {
+    if(index<8||index>=settings().size()||sourceMask<1||sourceMask>3)return false;
+    GUID scheme{};if(activeScheme(scheme))return false;
+    if((explicitMask(scheme,index)&sourceMask)!=sourceMask)return false;
+    for(bool ac:{true,false})if(sourceMask&(ac?1:2)) {
+        DWORD value=0;if(read(scheme,index,ac,value)||value>100)return false;
+    }
+    return true;
+}
+DWORD Power::capture(DWORD sourceMask, bool includeCpuOptions) {
     captureIssue.clear();
     if(sourceMask<1||sourceMask>3)return ERROR_INVALID_PARAMETER;
     if(hasJournal())return ERROR_ALREADY_EXISTS;
     if(!available())return ERROR_CALL_NOT_IMPLEMENTED;
+    if(!cpuOptions.valid())return ERROR_INVALID_PARAMETER;
     saved=Snapshot{}; saved.owner=GetCurrentProcessId(); DWORD e=activeScheme(saved.scheme); if(e)return e;
     e=mode(true,saved.acMode); if(e)return e; e=mode(false,saved.dcMode); if(e)return e;
     for(const GUID& scheme:{saved.scheme,GUID_POWER_MODE_BEST_EFFICIENCY,GUID_POWER_MODE_BEST_PERFORMANCE}) {
         for(DWORD i=0;i<settings().size();++i) {
+            if(i>=8&&(!includeCpuOptions||!cpuOptions.manages(i)))continue;
+            if(i>=10&&scheme!=saved.scheme)continue;
             Row r{scheme,i,0,0,explicitMask(scheme,i),profiles.value(i,true),profiles.value(i,false)};
-            if(!r.mask&&!(scheme==saved.scheme&&i!=2&&i!=4))continue;
-            if(scheme==saved.scheme&&r.mask!=3) {
+            if(i>=8) {
+                r.targetAc=cpuOptions.value(i,true);r.targetDc=cpuOptions.value(i,false);
+                // Only take ownership of existing overrides. Never create an
+                // inherited value that the recovery journal cannot remove.
+                if(scheme==saved.scheme&&i!=9&&(r.mask&sourceMask)!=sourceMask) {
+                    captureIssue=std::wstring(settings()[i].name)+L" needs explicit plan values. Disable this custom option to resume.";
+                    return ERROR_NOT_SUPPORTED;
+                }
+                if(!(r.mask&sourceMask))continue;
+            }
+            if(!r.mask&&!(scheme==saved.scheme&&i!=2&&i!=4&&i<8))continue;
+            if(scheme==saved.scheme&&i<8&&r.mask!=3) {
                 // Inherited values cannot be restored exactly by the v3 journal.
                 // Do not materialize overrides or silently replace the user's plan.
                 captureIssue=L"This power plan has inherited settings Pulse cannot safely restore. Select Balanced in Windows, then click Automatic.";
@@ -147,7 +174,7 @@ DWORD Power::configure() {
 }
 DWORD Power::persistProfiles() {
     if(owned||!profiles.valid())return ERROR_INVALID_STATE;
-    DWORD e=capture(3);if(e)return e;
+    DWORD e=capture(3,false);if(e)return e;
     for(DWORD i=0;i<saved.count&&!e;++i) {
         const auto& r=saved.rows[i];if(settings()[r.setting].dynamic)continue;
         for(bool ac:{true,false})if(r.mask&(ac?1:2)) {
@@ -167,7 +194,6 @@ DWORD Power::persistProfiles() {
     if(!DeleteFileW(journalPath().c_str())){e=GetLastError();restore();return e;}
     owned=false;return ERROR_SUCCESS;
 }
-static DWORD boostFor(PowerState state){return state==PowerState::Burst?2:state==PowerState::Compute?4:0;}
 static GUID modeFor(PowerState state){return state==PowerState::Efficiency?GUID_POWER_MODE_BEST_EFFICIENCY:GUID_POWER_MODE_BEST_PERFORMANCE;}
 DWORD Power::apply(PowerState state) {
     if(!owned)return ERROR_INVALID_STATE;
@@ -177,8 +203,9 @@ DWORD Power::apply(PowerState state) {
     for(DWORD i=0;i<saved.count;++i) {
         const auto& r=saved.rows[i]; if(!settings()[r.setting].dynamic)continue;
         for(bool ac:{true,false}) { if(!(r.mask&(ac?1:2)))continue; DWORD old=0; e=read(r.scheme,r.setting,ac,old); if(e)return e;
-            if(old!=boostFor(state))boostChanged=true;
-            e=write(r.scheme,r.setting,ac,boostFor(state)); if(e)return e;
+            const DWORD boost=cpuOptions.boost(state,ac);
+            if(old!=boost)boostChanged=true;
+            e=write(r.scheme,r.setting,ac,boost); if(e)return e;
         }
     }
     // Writes to the active plan need one explicit commit (never spawn powercfg).
@@ -198,7 +225,7 @@ DWORD Power::verify(PowerState state,bool full)const {
     for(DWORD i=0;i<saved.count;++i) {
         const auto& r=saved.rows[i]; const auto& s=settings()[r.setting]; if(!full&&!s.dynamic)continue;
         for(bool ac:{true,false}) { if(!(r.mask&(ac?1:2)))continue; DWORD value=0; e=read(r.scheme,r.setting,ac,value); if(e)return e;
-            DWORD expected=s.dynamic?boostFor(state):(ac?r.targetAc:r.targetDc); if(value!=expected)return ERROR_INVALID_STATE;
+            DWORD expected=s.dynamic?cpuOptions.boost(state,ac):(ac?r.targetAc:r.targetDc); if(value!=expected)return ERROR_INVALID_STATE;
         }
     }
     SYSTEM_POWER_STATUS status{}; if(!GetSystemPowerStatus(&status))return GetLastError();
@@ -237,11 +264,15 @@ std::wstring Power::report()const {
     std::wostringstream out; GUID plan{},ac{},dc{},effective{};
     auto p=activeScheme(plan),a=mode(true,ac),d=mode(false,dc),f=effectiveMode(effective);
     SYSTEM_POWER_STATUS status{}; GetSystemPowerStatus(&status);
-    out<<L"Pulse 1.1 - Windows power diagnostics\nNative power-mode API: "<<(available()?L"available":L"unavailable")
+    out<<L"Pulse 1.4.1 - Windows power diagnostics\nNative power-mode API: "<<(available()?L"available":L"unavailable")
        <<L"\nPower source: "<<(status.ACLineStatus==1?L"AC":status.ACLineStatus==0?L"Battery":L"Unknown")
        <<L"\nBattery: "<<(unsigned)status.BatteryLifePercent<<L"%\nEnergy Saver: "<<(unsigned)status.SystemStatusFlag
        <<L"\nPlan: "<<guidText(plan)<<L" ("<<p<<L")\nAC mode: "<<guidText(ac)<<L" ("<<a<<L")\nDC mode: "<<guidText(dc)<<L" ("<<d<<L")"
-       <<L"\nEffective overlay: "<<guidText(effective)<<L" ("<<f<<L")\n";
+       <<L"\nEffective overlay: "<<guidText(effective)<<L" ("<<f<<L")\n"
+       <<L"Custom EPP: "<<cpuOptions.epp<<L"; AC="<<cpuOptions.acEpp<<L"; DC="<<cpuOptions.dcEpp
+       <<L"\nDisable boost: AC="<<cpuOptions.disableBoostAc<<L"; DC="<<cpuOptions.disableBoostDc
+       <<L"\nCustom idle thresholds: "<<cpuOptions.idleThresholds<<L"; custom idle ceiling: "<<cpuOptions.idleLimit
+       <<L"\nEPP scope: existing plan/overlay overrides only; OS/firmware may override effective EPP.\n";
     for(const GUID& scheme:{plan,GUID_POWER_MODE_BEST_EFFICIENCY,GUID_POWER_MODE_BEST_PERFORMANCE}) {
         out<<L"\n"<<guidText(scheme)<<L"\n";
         for(DWORD i=0;i<settings().size();++i) { DWORD av=0,dv=0; auto ae=read(scheme,i,true,av),de=read(scheme,i,false,dv);

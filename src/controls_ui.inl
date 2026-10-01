@@ -3,11 +3,21 @@ static std::vector<std::pair<HWND, int>> pageControls;
 static undervolt::Capability uvCapability;
 static std::wstring profileMessage =
     L"Apply saves both AC and battery settings to the current Windows plan.";
-static constexpr int PageHome = 201, PagePower = 202, PageUv = 203, ProfileApply = 210,
+static constexpr int PageHome = 201, PagePower = 202, PageUv = 203, PageCpu = 204, ProfileApply = 210,
                      ProfileReset = 211, PlacementButton = 212;
 static constexpr int AcBase = 240, DcBase = 260, UvP = 301, UvE = 302, UvPSlider = 303,
                      UvESlider = 304, UvApply = 305, UvMonitor = 306, UvRefresh = 307,
                      ProfileStatus = 308, UvStatus = 309;
+static constexpr int CpuEpp = 330, CpuAcEpp = 331, CpuDcEpp = 332, CpuAcBoost = 333,
+                     CpuDcBoost = 334, CpuApply = 335, CpuRefresh = 336, CpuDefaults = 337,
+                     CpuStatus = 338, CpuVendor = 339, CpuHardwareStatus = 340, CpuDetected = 341;
+static constexpr int IdleOpen = 350, IdleBack = 351, IdleThresholds = 352, IdleLimit = 353,
+                     IdleAcDemote = 354, IdleDcDemote = 355, IdleAcPromote = 356,
+                     IdleDcPromote = 357, IdleAcLimit = 358, IdleDcLimit = 359,
+                     IdleApply = 360, IdleDefaults = 361, IdleStatus = 362, IdleSupport = 363;
+static void makeCpuPage();
+static void showCpuHardware();
+static void makeIdlePage();
 static HWND pageControl(int page, int id, const wchar_t *klass, const wchar_t *text, DWORD style,
                         int x, int y, int w, int h, HFONT f = nullptr) {
     HWND c = CreateWindowExW(0, klass, text, WS_CHILD | WS_TABSTOP | style, px(x), px(y), px(w),
@@ -54,6 +64,11 @@ static PageDrafts capturePageDrafts() {
     }
     for (int id : {UvP, UvE})
         result.text.emplace_back(id, controlText(id));
+    for (int id : {CpuAcEpp, CpuDcEpp,IdleAcDemote,IdleDcDemote,IdleAcPromote,IdleDcPromote}) result.text.emplace_back(id, controlText(id));
+    for (int id : {CpuEpp, CpuAcBoost, CpuDcBoost,IdleThresholds,IdleLimit})
+        result.checks.emplace_back(id, SendDlgItemMessageW(window,id,BM_GETCHECK,0,0));
+    result.combos.emplace_back(CpuVendor,SendDlgItemMessageW(window,CpuVendor,CB_GETCURSEL,0,0));
+    for(int id:{IdleAcLimit,IdleDcLimit})result.combos.emplace_back(id,SendDlgItemMessageW(window,id,CB_GETCURSEL,0,0));
     return result;
 }
 static void restorePageDrafts(const PageDrafts &drafts) {
@@ -63,6 +78,7 @@ static void restorePageDrafts(const PageDrafts &drafts) {
         SendDlgItemMessageW(window, id, BM_SETCHECK, value, 0);
     for (const auto &[id, value] : drafts.combos)
         SendDlgItemMessageW(window, id, CB_SETCURSEL, value, 0);
+    showCpuHardware();
 }
 static void populateProfiles() {
     for (bool ac : {true, false}) {
@@ -93,12 +109,12 @@ static void refreshUv() {
     EnableWindow(GetDlgItem(window, UvMonitor), uvCapability.canMonitor());
 }
 static void makePages() {
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 4; ++i)
         pageButton(-1, PageHome + i,
                    i == 0   ? L"Overview"
-                   : i == 1 ? L"Power & scheduling"
-                            : L"CPU undervolt",
-                   32 + i * 168, 80, 156, 30);
+                   : i == 1 ? L"Power & cores"
+                   : i == 2 ? L"CPU undervolt" : L"CPU options",
+                   32 + i * 130, 80, 122, 30);
     pageLabel(1, L"Power & core parking", 42, 138, 710, 43, hero);
     pageLabel(
         1, L"Independent AC / battery controls. Apply also works while boost control is bypassed.",
@@ -185,6 +201,8 @@ static void makePages() {
               42, 775, 710, 49, fontSmall);
     populateProfiles();
     refreshUv();
+    makeCpuPage();
+    makeIdlePage();
 }
 static void showPage(int page) {
     currentPage = page;
@@ -195,10 +213,13 @@ static void showPage(int page) {
                    (id == EfficiencyButton || page == 0) ? SW_SHOW : SW_HIDE);
     for (const auto &[h, p] : pageControls)
         ShowWindow(h, p == -1 || p == page ? SW_SHOW : SW_HIDE);
-    for (int id = PageHome; id <= PageUv; ++id)
+    showCpuHardware();
+    for (int id = PageHome; id <= PageCpu; ++id)
         InvalidateRect(GetDlgItem(window, id), nullptr, FALSE);
     InvalidateRect(window, nullptr, FALSE);
 }
+#include "cpu_ui.inl"
+#include "idle_ui.inl"
 static void destroyPages() {
     for (const auto &[h, p] : pageControls)
         DestroyWindow(h);
