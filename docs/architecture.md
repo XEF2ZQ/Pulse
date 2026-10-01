@@ -1,5 +1,9 @@
 # Architecture
 
+The [AMD SMI / Strix deep-idle decision](amd-idle-api-review.md) records why the
+newly proposed HSMP, HWCR and PCI recipes do not establish a supported actuator
+on the Windows HX370 target. This investigation changes no runtime behavior.
+
 The 1.4.1 [CPU options patch](cpu-options.md) adds explicit opt-in Windows EPP,
 boost-disable and idle-policy preferences through the existing power writer and
 source-specific journal. Register-level Intel/AMD controls remain unavailable;

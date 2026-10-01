@@ -76,6 +76,10 @@ to execute register writes. Several premises require correction:
 
 ## AMD CC6, PC6 and requested C-states
 
+The follow-up [AMD SMI / Strix idle API review](amd-idle-api-review.md) traces
+the supplied CC6, PC6 and Data Fabric controls to their HSMP backend and evaluates
+the proposed HWCR/PCI writes. It enables no additional hardware controls.
+
 CC6 is a **core** deep-idle state; PC6 is a **package** state. Neither is a renamed
 Intel C1E promotion bit. A permission to enter a deep state is also different
 from forcing that state while useful work is running. Firmware and the OS choose
