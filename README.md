@@ -3,6 +3,8 @@
 <p align="center"><strong>Responsive Windows power policy with bounded overhead and recoverable settings.</strong></p>
 <p align="center">C++20 · Native Win32 · Windows 11 x64 · Battery-first · G Helper companion</p>
 
+**Standard branch:** conservative 1.4.3.2 cadence baseline. New scheduling work continues separately on `experimental`; see [release lines](BRANCHES.md).
+
 Pulse temporarily gives interactive requests and productive CPU work more performance headroom, then returns to an efficient baseline. It addresses a practical tradeoff: permanently disabling boost can make a laptop sluggish; treating every busy interval as performance-critical can waste energy during routine media or voice use.
 
 **Current local line: 1.4.3.2-cadence-preview.** Avoids redundant power-plan activation while retaining 1.4.3's adaptive monitoring intervals. Includes an [opt-in battery idle interval](docs/battery-idle-interval.md), with tested restoration during performance work and after failure. It does not force C-states or fabric downclocks. The separate 1.4.4 panel/platform investigation is experimental and excluded from this build.
