@@ -254,6 +254,8 @@ struct Controller::Impl {
   std::map<DWORD, std::unique_ptr<Entry>> entries;
   ProcessDiscovery discovery;
   std::vector<ProcessIdentity> snapshot;
+  std::vector<ULONG>
+      queryScratch; // One allocation; reused by the GUI-thread hot loop.
   Selection selection;
   std::wstring folder = appFolder(),
                reason = L"Placement is opt-in; acceptance measurements pending";
@@ -269,6 +271,7 @@ struct Controller::Impl {
   Impl() {
     ProcessIdToSessionId(GetCurrentProcessId(), &session);
     snapshot.reserve(512);
+    queryScratch.reserve(MaxSets);
   }
   ~Impl() {
     entries.clear();
@@ -496,11 +499,18 @@ void Controller::tick(uint64_t now, DWORD foreground, bool eligible,
       e.demand.update(now, e.occupancy, valid, e.known);
     e.cpu = total;
     e.at = now;
-    IO_COUNTERS io{};
-    e.ioBusy = !GetProcessIoCounters(e.h.value, &io) ||
-               io.ReadTransferCount != e.io.ReadTransferCount ||
-               io.WriteTransferCount != e.io.WriteTransferCount;
-    e.io = io;
+    // I/O evidence is used only by background eligibility. A candidate that
+    // loses its window gets a fresh baseline before it can be restricted.
+    if (!e.hasWindow && maintenance(e.name)) {
+      IO_COUNTERS io{};
+      e.ioBusy = !GetProcessIoCounters(e.h.value, &io) ||
+                 io.ReadTransferCount != e.io.ReadTransferCount ||
+                 io.WriteTransferCount != e.io.WriteTransferCount;
+      e.io = io;
+    } else {
+      e.ioBusy = true;
+      e.io = {};
+    }
     if (e.demand.compute)
       e.lastHot = now;
     // Invalid samples release placement but do not manufacture a global boost.
@@ -561,10 +571,9 @@ void Controller::tick(uint64_t now, DWORD foreground, bool eligible,
     const auto &target =
         action == Action::Four ? p.selection.four : p.selection.background;
     if (e.owned) {
-      std::vector<ULONG> actual;
-      if (!query(e.h.value, actual) ||
-          actual != std::vector<ULONG>(e.record.sets,
-                                       e.record.sets + e.record.count)) {
+      auto &actual = p.queryScratch;
+      if (!query(e.h.value, actual) || actual.size() != e.record.count ||
+          !std::equal(actual.begin(), actual.end(), e.record.sets)) {
         e.conflict = true;
         ++p.conflicts;
         // Release our independent QoS bit if still owned; preserve CPU Sets
@@ -580,7 +589,7 @@ void Controller::tick(uint64_t now, DWORD foreground, bool eligible,
     if (p.budget >= 16 || (e.lastChange && now - e.lastChange < dwell) ||
         (e.lastHot && now - e.lastHot < 2000))
       continue;
-    std::vector<ULONG> original;
+    auto &original = p.queryScratch;
     if (!p.safe(e) || !query(e.h.value, original) || !original.empty()) {
       e.conflict = true;
       ++p.skips;
@@ -650,7 +659,7 @@ void Controller::tick(uint64_t now, DWORD foreground, bool eligible,
       ++p.budget;
       e.lastChange = now;
     }
-    std::vector<ULONG> actual;
+    auto &actual = p.queryScratch;
     if (!p.error && (!query(e.h.value, actual) || actual != target))
       p.error = ERROR_INVALID_STATE;
     if (!p.error && record.qosOwned) {

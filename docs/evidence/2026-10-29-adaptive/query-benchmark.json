@@ -1,0 +1,19 @@
+{
+  "temporary": {
+    "rounds": 10,
+    "queries_per_round": 50000,
+    "mean_ms": 35.45199,
+    "stdev_ms": 3.5434071809331895,
+    "median_ms": 34.45285,
+    "buffer_growths": 500000
+  },
+  "reuse": {
+    "rounds": 10,
+    "queries_per_round": 50000,
+    "mean_ms": 30.5859,
+    "stdev_ms": 1.7990248142319283,
+    "median_ms": 29.7103,
+    "buffer_growths": 0
+  },
+  "modeled_saving_us_per_64_queries": 6.228595200000004
+}

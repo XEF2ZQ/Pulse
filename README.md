@@ -3,12 +3,12 @@
 <p align="center"><strong>Responsive Windows power policy with bounded overhead and recoverable settings.</strong></p>
 <p align="center">C++20 · Native Win32 · Windows 11 x64 · Battery-first · G Helper companion</p>
 
-**This is the experimental branch — 1.5.0 candidate.** New battery-only process
+**This is the experimental branch — 1.5.1 candidate.** New battery-only process
 CPU Sets, background consolidation and optional EcoQoS are implemented but remain
 OFF by default. Exact four-core execution failed intermittently despite accepted
 API readback. Read the [implementation and limits](docs/adaptive-experimental.md),
 [measured evidence](docs/evidence/2026-10-29-adaptive/README.md) and
-[branch policy](BRANCHES.md). The standard installation is preserved separately.
+[branch policy](BRANCHES.md). The standard installation is preserved separately. See the [native-loop efficiency follow-up](docs/native-loop-efficiency.md) for the measured, small buffer-reuse optimization.
 
 Pulse temporarily gives interactive requests and productive CPU work more performance headroom, then returns to an efficient baseline. It addresses a practical tradeoff: permanently disabling boost can make a laptop sluggish; treating every busy interval as performance-critical can waste energy during routine media or voice use.
 

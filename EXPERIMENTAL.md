@@ -1,7 +1,7 @@
 # Pulse experimental line
 
 This branch continues from preserved 1.4.4-platform-idle-preview. The current
-candidate is **1.5.0-experimental**, with battery-only adaptive scheduling.
+candidate is **1.5.1-experimental**, with battery-only adaptive scheduling.
 
 New scheduling controls remain off until explicitly enabled. This is not the
 installed standard build and must not silently replace its startup entry.

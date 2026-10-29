@@ -269,7 +269,7 @@ std::wstring Power::report()const {
     std::wostringstream out; GUID plan{},ac{},dc{},effective{};
     auto p=activeScheme(plan),a=mode(true,ac),d=mode(false,dc),f=effectiveMode(effective);
     SYSTEM_POWER_STATUS status{}; GetSystemPowerStatus(&status);
-    out<<L"Pulse 1.5.0 experimental - Windows power diagnostics\nNative power-mode API: "<<(available()?L"available":L"unavailable")
+    out<<L"Pulse 1.5.1 experimental - Windows power diagnostics\nNative power-mode API: "<<(available()?L"available":L"unavailable")
        <<L"\nPower source: "<<(status.ACLineStatus==1?L"AC":status.ACLineStatus==0?L"Battery":L"Unknown")
        <<L"\nBattery: "<<(unsigned)status.BatteryLifePercent<<L"%\nEnergy Saver: "<<(unsigned)status.SystemStatusFlag
        <<L"\nPlan: "<<guidText(plan)<<L" ("<<p<<L")\nAC mode: "<<guidText(ac)<<L" ("<<a<<L")\nDC mode: "<<guidText(dc)<<L" ("<<d<<L")"

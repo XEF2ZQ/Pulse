@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.1-experimental — native-loop follow-up, 2026-10-29
+
+- Reuse the bounded CPU-set query buffer and compare owned IDs without a temporary vector; avoid I/O queries for roles that do not use I/O evidence.
+- Preserve source gating, sampling intervals and reaction thresholds. All resident loops already use native C++20.
+- Add a read-only alternating query microbenchmark: 35.452 ms to 30.586 ms mean per 50,000 queries, approximately 6.23 microseconds per 64 queries. This is not a whole-controller or energy-saving result.
+- Keep new placement/background policies off by default; previous physical-execution acceptance failures still apply. See [measurement and scope](docs/native-loop-efficiency.md).
+
 ## 1.5.0-experimental — acceptance-gated candidate, 2026-10-29
 
 - Split continuing `standard` and `experimental` source lines; preserve the installed standard build.

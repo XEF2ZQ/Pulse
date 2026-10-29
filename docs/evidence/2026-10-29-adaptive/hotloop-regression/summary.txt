@@ -1,0 +1,19 @@
+ac=0 battery_percent=27 saver=0
+physical=4 logical=8 groups=1
+transaction_error=0
+apply_readback_ms=0.0284
+before_work (id:flags): 256:0 257:0 258:1 259:1 260:1 261:1 262:0 263:0 264:0 265:0 266:1 267:1 268:1 269:1 270:0 271:0 272:1 273:1 274:1 275:1 276:1 277:1 278:1 279:1
+observed_inside=2791 outside=0
+after_work (id:flags): 256:1 257:1 258:1 259:1 260:1 261:1 262:0 263:0 264:1 265:1 266:1 267:1 268:1 269:1 270:1 271:1 272:1 273:1 274:1 275:1 276:1 277:1 278:1 279:1
+worker_explicit_cpu_sets=0 affinity=16777215 group=0
+location_8=158
+location_9=667
+location_12=236
+location_14=542
+location_15=1188
+foreground_rescue_ms=4.8529 clear=1
+source_gate_had_assignment=1 source_gate_restored=1
+selected=1 compute_released=1 coordinator_cpu_ms=62.5 duration_ms=15203 handles_start=93 handles_end=93
+crash_owned=1 recovery=0 restored=1
+passed=1
+Exploratory CPU-placement test only. Energy, browser/media and full power-tier A/B gates remain unmeasured.

@@ -41,6 +41,8 @@ jobs:
             build/Release/Pulse.exe
             build/Release/PulseTailProbe.exe
             build/Release/PulseAdaptiveProbe.exe
+            build/Release/PulsePlacementQueryBench.exe
+            docs/native-loop-efficiency.md
             docs/adaptive-experimental.md
             BRANCHES.md
             build/Testing/Temporary/LastTest.log
