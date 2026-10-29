@@ -1,5 +1,8 @@
 // Windows idle-policy editor. OS indices must never be labelled as CC6/PC6.
 static void populateIdle(const cpu::Options &o) {
+  SendDlgItemMessageW(window, IdleEarly, BM_SETCHECK,
+                      o.earlyIdle ? BST_CHECKED : BST_UNCHECKED, 0);
+  setControlText(IdleInterval, std::to_wstring(o.idleUs));
   SendDlgItemMessageW(window, IdleThresholds, BM_SETCHECK,
                       o.idleThresholds ? BST_CHECKED : BST_UNCHECKED, 0);
   SendDlgItemMessageW(window, IdleLimit, BM_SETCHECK,
@@ -15,6 +18,8 @@ static void refreshIdleSupport() {
   const bool thresholds =
       power.optionAvailable(10) && power.optionAvailable(11);
   const bool limit = power.optionAvailable(12);
+  const bool interval = power.optionAvailable(13, 2);
+  EnableWindow(GetDlgItem(window, IdleEarly), interval || power.cpuOptions.earlyIdle);
   // An already-saved option must remain uncheckable even if the plan changed.
   EnableWindow(GetDlgItem(window, IdleThresholds),
                thresholds || power.cpuOptions.idleThresholds);
@@ -30,6 +35,11 @@ static void refreshIdleSupport() {
                     L"is not verified."
                   : L"\nOS idle ceiling unavailable: inherited original cannot "
                     L"be restored exactly.";
+  GUID scheme{}; DWORD us=0;
+  if (!power.activeScheme(scheme) && !power.read(scheme,13,false,us))
+    status = L"Battery idle interval readback: " + std::to_wstring(us) +
+             L" us. " + (interval ? L"Reversible control available." : L"Inherited value; control unavailable.") +
+             L"\nHardware entry time / fabric clocks are not measured by this value.";
   setControlText(IdleSupport, status);
 }
 static void makeIdlePage() {
@@ -58,11 +68,13 @@ static void makeIdlePage() {
       SendDlgItemMessageW(window, id, EM_SETLIMITTEXT, 3, 0);
     }
   }
-  pageLabel(4,
-            L"Windows decides when to move between idle states. Values are OS "
-            L"policy percentages;\nthey do not select CC6 directly or "
-            L"guarantee a particular wake latency.",
-            42, 424, 710, 45, fontSmall);
+  SetWindowTheme(pageControl(4, IdleEarly, L"BUTTON",
+                             L"Shorter idle-policy interval on battery (Efficiency only)",
+                             BS_AUTOCHECKBOX, 42, 423, 710, 27), L"", L"");
+  pageLabel(4, L"Interval: 100–50,000 microseconds (1,000 = 1 ms)", 42, 459, 585, 25, fontSmall);
+  pageControl(4, IdleInterval, L"EDIT", L"", WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL,
+              650, 455, 86, 28);
+  SendDlgItemMessageW(window, IdleInterval, EM_SETLIMITTEXT, 5, 0);
   SetWindowTheme(pageControl(4, IdleLimit, L"BUTTON",
                              L"Request a Windows idle-state ceiling",
                              BS_AUTOCHECKBOX, 42, 495, 710, 28),
@@ -85,14 +97,19 @@ static void makeIdlePage() {
   pageButton(4, IdleDefaults, L"Load defaults", 280, 712, 220, 38);
   pageButton(4, IdleBack, L"Back to CPU options", 516, 712, 220, 38);
   pageLabel(4,
-            L"Pause, AC bypass and exit restore Pulse-owned values. No new "
-            L"monitoring timer.",
+            L"Interval restores for Burst / Compute; bypassed on AC and weak chargers.\n"
+            L"Not forced C-states or fabric control. Pause / exit restore originals.",
             42, 778, 710, 51, fontSmall, IdleStatus);
   populateIdle(power.cpuOptions);
   refreshIdleSupport();
 }
 static bool applyIdleUi() {
   auto proposed = power.cpuOptions;
+  proposed.earlyIdle = SendDlgItemMessageW(window, IdleEarly, BM_GETCHECK, 0, 0) == BST_CHECKED;
+  if (!cpu::parseIdleInterval(controlText(IdleInterval), proposed.idleUs)) {
+    setControlText(IdleStatus, L"Enter an interval from 100 to 50,000 microseconds. No changes applied.");
+    return false;
+  }
   proposed.idleThresholds =
       SendDlgItemMessageW(window, IdleThresholds, BM_GETCHECK, 0, 0) ==
       BST_CHECKED;

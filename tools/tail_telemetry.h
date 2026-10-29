@@ -144,6 +144,7 @@ struct SensorValue {
     double value = missing;
 };
 struct SensorSnapshot {
+    uint32_t version = 0, revision = 0;
     int64_t pollTime = 0;
     uint32_t periodMs = 0;
     std::vector<SensorValue> values;
@@ -162,10 +163,15 @@ inline std::string wireString(std::span<const unsigned char> data, size_t at, si
 }
 inline bool parseSensors(std::span<const unsigned char> bytes, SensorSnapshot &out) {
     out = {};
-    if (bytes.size() < 44 || field<uint32_t>(bytes, 0) != 0x53695748 ||
-        field<uint32_t>(bytes, 4) != 1)
+    if (bytes.size() < 44 || field<uint32_t>(bytes, 0) != 0x53695748)
         return false;
+    const auto version = field<uint32_t>(bytes, 4);
     const auto rev = field<uint32_t>(bytes, 8);
+    // V2 appends UTF-8 text to the existing records; the original names,
+    // units and numeric prefix retain their offsets. Keep the original labels
+    // for stable analysis keys. Accept only the layouts validated here.
+    if ((version != 1 && version != 2) || rev > 1 || (version == 2 && rev != 1))
+        return false;
     if (rev >= 1 && bytes.size() < 48)
         return false;
     const auto so = field<uint32_t>(bytes, 20), ss = field<uint32_t>(bytes, 24),
@@ -177,12 +183,15 @@ inline bool parseSensors(std::span<const unsigned char> bytes, SensorSnapshot &o
         return offset >= header && offset <= bytes.size() && stride >= minimum && count <= 8192 &&
                count <= (bytes.size() - offset) / stride;
     };
-    if (!section(so, ss, sn, 264) || !section(ro, rs, rn, 316))
+    if (!section(so, ss, sn, version == 2 ? 392 : 264) ||
+        !section(ro, rs, rn, version == 2 ? 460 : 316))
         return false;
     const size_t sensorEnd = size_t(so) + size_t(ss) * sn,
                  readingEnd = size_t(ro) + size_t(rs) * rn;
     if (sn && rn && !(sensorEnd <= ro || readingEnd <= so))
         return false;
+    out.version = version;
+    out.revision = rev;
     out.pollTime = field<int64_t>(bytes, 12);
     out.periodMs = rev ? field<uint32_t>(bytes, 44) : 0;
     out.values.reserve(rn);
@@ -206,6 +215,24 @@ inline bool parseSensors(std::span<const unsigned char> bytes, SensorSnapshot &o
         out.values.push_back(std::move(v));
     }
     return true;
+}
+// HWiNFO may reserve a much larger mapping than the published record sections.
+// Bound the copied payload, not its virtual reservation. Called under its mutex.
+inline size_t snapshotSize(std::span<const unsigned char> header, size_t mappedSize) {
+    if (header.size() < 48 || field<uint32_t>(header, 0) != 0x53695748)
+        return 0;
+    const size_t limit = std::min<size_t>(mappedSize, 16 * 1024 * 1024);
+    size_t end = 48;
+    for (size_t at : {size_t(20), size_t(32)}) {
+        const size_t offset = field<uint32_t>(header, at),
+                     stride = field<uint32_t>(header, at + 4),
+                     count = field<uint32_t>(header, at + 8);
+        if (offset < 44 || offset > limit || !stride || count > 8192 ||
+            count > (limit - offset) / stride)
+            return 0;
+        end = std::max(end, offset + stride * count);
+    }
+    return end <= limit ? end : 0;
 }
 class Hwinfo {
     Handle mapping_, mutex_;
@@ -235,13 +262,11 @@ class Hwinfo {
         }
         MEMORY_BASIC_INFORMATION region{};
         if (!VirtualQuery(view_, &region, sizeof(region)) || region.State != MEM_COMMIT ||
-            (region.Protect & (PAGE_GUARD | PAGE_NOACCESS)) ||
-            region.RegionSize > 16 * 1024 * 1024) {
+            (region.Protect & (PAGE_GUARD | PAGE_NOACCESS)) || region.RegionSize < 48) {
             error = ERROR_INVALID_DATA;
             return;
         }
         size_ = region.RegionSize;
-        buffer_.resize(size_);
         error = 0;
     }
     ~Hwinfo() {
@@ -259,7 +284,22 @@ class Hwinfo {
             error = wait == WAIT_TIMEOUT ? ERROR_BUSY : ERROR_INVALID_DATA;
             return false;
         }
-        std::memcpy(buffer_.data(), view_, size_);
+        unsigned char header[48]{};
+        std::memcpy(header, view_, sizeof(header));
+        const size_t used = snapshotSize(header, size_);
+        if (!used) {
+            ReleaseMutex(mutex_.value);
+            error = ERROR_INVALID_DATA;
+            return false;
+        }
+        try {
+            buffer_.resize(used);
+        } catch (...) {
+            ReleaseMutex(mutex_.value);
+            error = ERROR_NOT_ENOUGH_MEMORY;
+            return false;
+        }
+        std::memcpy(buffer_.data(), view_, used);
         ReleaseMutex(mutex_.value);
         const bool ok = parseSensors(buffer_, out);
         error = ok ? ERROR_SUCCESS : ERROR_INVALID_DATA;

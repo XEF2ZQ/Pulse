@@ -1,6 +1,8 @@
 #include <initguid.h>
 #include "../tools/tail_telemetry.h"
 #include <iostream>
+#include <fstream>
+#include <filesystem>
 #include <stdexcept>
 using namespace pulse::tail;
 static unsigned checks = 0;
@@ -13,8 +15,9 @@ static unsigned checks = 0;
 template <class T> void put(std::vector<unsigned char> &b, size_t at, T value) {
     std::memcpy(b.data() + at, &value, sizeof(value));
 }
-int main() {
+int wmain(int argc, wchar_t **argv) {
     try {
+        if (argc > 2) throw std::runtime_error("Usage: tail_tests [captured-shared-memory.bin]");
         BatterySample b;
         b.error = 0;
         b.rawRate = -18000;
@@ -89,6 +92,63 @@ int main() {
         bad = bytes;
         std::fill(bad.begin() + 324, bad.begin() + 452, 'X');
         CHECK(parseSensors(bad, s) && s.values[0].label.size() == 128);
+        // Replay the observed v2 record sizes. Numeric values are still in the
+        // original prefix; extension bytes must never be mistaken for doubles.
+        std::vector<unsigned char> v2(48 + 392 + 460, 0xA5);
+        std::copy_n(bytes.begin(), 48, v2.begin());
+        std::copy_n(bytes.begin() + 48, 264, v2.begin() + 48);
+        std::copy_n(bytes.begin() + 312, 316, v2.begin() + 440);
+        put<uint32_t>(v2, 4, 2);
+        put<uint32_t>(v2, 24, 392);
+        put<uint32_t>(v2, 32, 440);
+        put<uint32_t>(v2, 36, 460);
+        CHECK(parseSensors(v2, s));
+        CHECK(snapshotSize(std::span(v2).first(48), 20029440) == v2.size());
+        CHECK(snapshotSize(std::span(v2).first(48), v2.size() - 1) == 0);
+        CHECK(snapshotSize(std::span(v2).first(44), v2.size()) == 0);
+        CHECK(s.version == 2 && s.revision == 1 && s.periodMs == 2000);
+        CHECK(s.values.size() == 1 && s.values[0].value == 4.5 &&
+              s.values[0].unit == "W" && s.values[0].label == "CPU Package Power");
+        for (size_t n = 0; n < v2.size(); ++n)
+            CHECK(!parseSensors(std::span(v2).first(n), s) && s.values.empty());
+        bad = v2;
+        put<uint32_t>(bad, 24, 264);
+        CHECK(!parseSensors(bad, s));
+        bad = v2;
+        put<uint32_t>(bad, 36, 316);
+        CHECK(!parseSensors(bad, s));
+        bad = v2;
+        put<uint32_t>(bad, 8, 2);
+        CHECK(!parseSensors(bad, s));
+        bad = v2;
+        put<uint32_t>(bad, 4, 3);
+        CHECK(!parseSensors(bad, s));
+        bad = v2;
+        put<uint32_t>(bad, 32, UINT32_MAX);
+        CHECK(snapshotSize(bad, SIZE_MAX) == 0);
+        bad = v2;
+        put<uint32_t>(bad, 36, UINT32_MAX);
+        CHECK(snapshotSize(bad, SIZE_MAX) == 0);
+        bad = v2;
+        put<uint32_t>(bad, 36, 0);
+        CHECK(snapshotSize(bad, SIZE_MAX) == 0);
+        if (argc == 2) {
+            // Offline replay of a locally captured, mutex-protected snapshot.
+            const auto path = std::filesystem::path(argv[1]);
+            const auto length = std::filesystem::file_size(path);
+            CHECK(length >= 48 && length <= 64 * 1024 * 1024);
+            std::vector<unsigned char> captured(static_cast<size_t>(length));
+            std::ifstream input(path, std::ios::binary);
+            CHECK(bool(input.read(reinterpret_cast<char *>(captured.data()),
+                                  static_cast<std::streamsize>(length))));
+            const size_t used = snapshotSize(captured, captured.size());
+            CHECK(used != 0);
+            CHECK(parseSensors(std::span(captured).first(used), s));
+            CHECK(s.values.size() == field<uint32_t>(captured, 40));
+            std::cout << "REPLAY: version=" << s.version << " revision=" << s.revision
+                      << " readings=" << s.values.size() << " copied_bytes=" << used
+                      << " reserved_bytes=" << length << '\n';
+        }
         std::cout << "PASS: " << checks
                   << " battery conversion and shared-memory boundary checks\n";
         return 0;

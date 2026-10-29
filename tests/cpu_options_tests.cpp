@@ -56,6 +56,7 @@ int main() {
     for (unsigned i = 8; i <= 12; ++i)
       check(o.manages(i), "enabled setting ownership");
     check(!o.manages(7) && !o.manages(13), "bounded settings");
+    o.earlyIdle=true;o.idleUs=100;
     check(o.value(8, true) == 33 && o.value(9, false) == 77 &&
               o.value(10, true) == 15 && o.value(11, false) == 70 &&
               o.value(12, false) == 3,
@@ -90,6 +91,9 @@ int main() {
     WritePrivateProfileStringW(L"CpuOptions", L"CustomEpp", L"2", path.c_str());
     check(cpu::load(path) == cpu::Options{},
           "invalid boolean disables the option set");
+    check(cpu::save(path,o),"restore before interval corruption");
+    WritePrivateProfileStringW(L"CpuOptions",L"IdleIntervalUs",L"0",path.c_str());
+    check(cpu::load(path)==cpu::Options{},"invalid interval fails closed");
     cpu::Capability c;
     check(!c.knownVendor() && !c.registerWriter,
           "unknown hardware grants no access");

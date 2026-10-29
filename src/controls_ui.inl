@@ -14,7 +14,8 @@ static constexpr int CpuEpp = 330, CpuAcEpp = 331, CpuDcEpp = 332, CpuAcBoost = 
 static constexpr int IdleOpen = 350, IdleBack = 351, IdleThresholds = 352, IdleLimit = 353,
                      IdleAcDemote = 354, IdleDcDemote = 355, IdleAcPromote = 356,
                      IdleDcPromote = 357, IdleAcLimit = 358, IdleDcLimit = 359,
-                     IdleApply = 360, IdleDefaults = 361, IdleStatus = 362, IdleSupport = 363;
+                     IdleApply = 360, IdleDefaults = 361, IdleStatus = 362, IdleSupport = 363,
+                     IdleEarly = 364, IdleInterval = 365;
 static void makeCpuPage();
 static void showCpuHardware();
 static void makeIdlePage();
@@ -64,8 +65,8 @@ static PageDrafts capturePageDrafts() {
     }
     for (int id : {UvP, UvE})
         result.text.emplace_back(id, controlText(id));
-    for (int id : {CpuAcEpp, CpuDcEpp,IdleAcDemote,IdleDcDemote,IdleAcPromote,IdleDcPromote}) result.text.emplace_back(id, controlText(id));
-    for (int id : {CpuEpp, CpuAcBoost, CpuDcBoost,IdleThresholds,IdleLimit})
+    for (int id : {CpuAcEpp, CpuDcEpp,IdleAcDemote,IdleDcDemote,IdleAcPromote,IdleDcPromote,IdleInterval}) result.text.emplace_back(id, controlText(id));
+    for (int id : {CpuEpp, CpuAcBoost, CpuDcBoost,IdleThresholds,IdleLimit,IdleEarly})
         result.checks.emplace_back(id, SendDlgItemMessageW(window,id,BM_GETCHECK,0,0));
     result.combos.emplace_back(CpuVendor,SendDlgItemMessageW(window,CpuVendor,CB_GETCURSEL,0,0));
     for(int id:{IdleAcLimit,IdleDcLimit})result.combos.emplace_back(id,SendDlgItemMessageW(window,id,CB_GETCURSEL,0,0));

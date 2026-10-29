@@ -87,7 +87,7 @@ int wmain(int argc, wchar_t **argv) {
         std::filesystem::path output =
             std::filesystem::path(executable).parent_path() / L"TailCaptures" / runName;
         unsigned duration = 90, period = 500, workers = 0;
-        bool inventory = false, requireHwinfo = false;
+        bool inventory = false, requireHwinfo = false, requireBattery = false;
         for (int i = 1; i < argc; ++i) {
             std::wstring arg = argv[i];
             auto next = [&]() -> std::wstring {
@@ -107,10 +107,12 @@ int wmain(int argc, wchar_t **argv) {
                 inventory = true;
             else if (arg == L"--require-hwinfo")
                 requireHwinfo = true;
+            else if (arg == L"--require-battery")
+                requireBattery = true;
             else if (arg == L"--help") {
                 std::cout
                     << "PulseTailProbe --out folder [--seconds 90] [--period-ms 500] [--exercise "
-                       "1..8] [--inventory] [--require-hwinfo]\nRead-only telemetry. Optional exercise: 8 seconds of "
+                       "1..8] [--inventory] [--require-hwinfo] [--require-battery]\nRead-only telemetry. Optional exercise: 8 seconds of "
                        "CPU work after 30 seconds idle. No power writes.\n";
                 return 0;
             } else
@@ -119,6 +121,11 @@ int wmain(int argc, wchar_t **argv) {
         if (duration < 1 || duration > 1800 || period < 250 || period > 5000 || workers > 8 ||
             (workers && duration < 60))
             throw std::runtime_error("Option outside bounded range");
+        if (requireBattery) {
+            SYSTEM_POWER_STATUS source{};
+            if (!GetSystemPowerStatus(&source) || source.ACLineStatus != 0)
+                throw std::runtime_error("Battery-only capture requires confirmed battery power");
+        }
         std::filesystem::create_directories(output);
         // Exclusive new run directory: avoid overwriting previous evidence.
         for (const auto *name :
@@ -132,10 +139,13 @@ int wmain(int argc, wchar_t **argv) {
         const auto first = battery.read();
         std::ofstream meta(output / L"metadata.txt");
         meta.exceptions(std::ios::failbit | std::ios::badbit);
-        meta << "PulseTailProbe 0.2\ninterval_ms=" << period << "\nseconds=" << duration
+        meta << "PulseTailProbe 0.3\ninterval_ms=" << period << "\nseconds=" << duration
              << "\nexercise_workers=" << workers << "\nbattery_open_error=" << battery.openError
              << "\nbattery_read_error=" << first.error << "\nhwinfo_error=" << hwinfo.error
-             << "\nhwinfo_period_ms=" << sensors.periodMs << "\n";
+             << "\nhwinfo_period_ms=" << sensors.periodMs
+             << "\nhwinfo_version=" << sensors.version
+             << "\nhwinfo_revision=" << sensors.revision
+             << "\nrequire_battery=" << requireBattery << "\n";
         std::cout << "Battery error=" << first.error << " discharge_W=" << first.dischargeW
                   << "; HWiNFO error=" << hwinfo.error << " readings=" << sensors.values.size()
                   << " period_ms=" << sensors.periodMs << '\n';
@@ -233,6 +243,13 @@ int wmain(int argc, wchar_t **argv) {
             SYSTEM_POWER_STATUS power{};
             const bool sourceKnown = GetSystemPowerStatus(&power) != FALSE;
             const bool policySourceKnown = sourceKnown && power.ACLineStatus <= 1;
+            if (requireBattery && (!policySourceKnown || power.ACLineStatus != 0)) {
+                loadStop = true;
+                jobs.clear();
+                events << elapsed << ",capture_aborted_source_changed\n";
+                meta << "capture_aborted=source_changed\n";
+                throw std::runtime_error("Battery-only capture stopped: source changed or unknown");
+            }
             if (started && !ended &&
                 (!policySourceKnown || power.ACLineStatus != 0 || power.SystemStatusFlag == 1 ||
                  power.BatteryLifePercent == 255 || power.BatteryLifePercent < 15)) {

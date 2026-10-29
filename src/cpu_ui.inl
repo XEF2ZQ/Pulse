@@ -149,6 +149,10 @@ static bool commitCpuOptions(const cpu::Options &proposed, int statusId) {
     return false;
   if (!cpuCapability.knownVendor() || !power.available())
     return false;
+  if (proposed.earlyIdle && !power.optionAvailable(13, 2)) {
+    setControlText(statusId, L"Battery idle interval lacks a restorable original in this plan.");
+    return false;
+  }
   for (unsigned index : {8u, 10u, 11u, 12u}) {
     if (proposed.manages(index) && !power.optionAvailable(index)) {
       setControlText(

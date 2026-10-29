@@ -3,6 +3,8 @@
 #include "productive_monitor.h"
 #include "scheduler_policy.h"
 #include "efficiency.h"
+#include "pcie_guard.h"
+#include "power_source.h"
 #include "placement.h"
 #include "undervolt.h"
 #include <dbt.h>
@@ -34,6 +36,9 @@ constexpr UINT BenchmarkMsg=WM_APP+5, ModeMsg=WM_APP+6, SchedulerRefreshMsg=WM_A
 constexpr UINT TickTimer=1, StopTimer=2, CheckTimer=3;
 constexpr int AutoButton=101, EcoButton=102, PauseButton=103, BoostButton=104, ReportButton=105, HelperButton=106, ExitButton=107, AcButton=108, SchedulerButton=109, EfficiencyButton=110;
 static efficiency::Client efficiencyOptions;
+static pcie::Guard pcieGuard;
+static supply::Monitor supplyMonitor;
+static bool recognizeWeak=true, weakCharger=false, windowsAc=false, bridging=false, appliedWindowsAc=false, sourceKnown=false;
 static HWND window=nullptr;
 static Power power;
 static Policy policy;
@@ -109,8 +114,12 @@ static DWORD inputAge() { LASTINPUTINFO i{sizeof(i)}; return GetLastInputInfo(&i
 static void environment() {
     sample.now=GetTickCount64();sample.inputAge=inputAge();
     SYSTEM_POWER_STATUS s{};bool valid=GetSystemPowerStatus(&s)!=FALSE;
-    sample.battery=!valid||s.ACLineStatus!=1;
-    sample.blocked=locked||displayOff||suspended||!valid||s.SystemStatusFlag==1;
+    const auto supply=supplyMonitor.decide(valid,s);
+    sourceKnown=supply.known;
+    windowsAc=valid&&s.ACLineStatus==1;
+    weakCharger=recognizeWeak&&supply.weak;
+    sample.battery=!(windowsAc||weakCharger);
+    sample.blocked=locked||displayOff||suspended||!supply.known||s.SystemStatusFlag==1;
 }
 static bool browserName(const std::wstring& n) {
     return n==L"chrome.exe"||n==L"msedge.exe"||n==L"firefox.exe"||n==L"thorium.exe"||n==L"brave.exe"||n==L"opera.exe"||n==L"vivaldi.exe";
@@ -265,15 +274,19 @@ static DWORD guardian() {
 }
 static void turnOn() {
     armed=true;environment();
-    if(enabled)return;fault.clear();
-    if(!sample.battery&&!manageAC){setTimer();updateUi();return;}
+    if(enabled||bridging)return;fault.clear();
+    if(!sourceKnown){setTimer();updateUi();return;}
+    if(!sample.battery&&!manageAC&&!weakCharger){setTimer();updateUi();return;}
+    power.dcUsesAcProfile=weakCharger;
+    power.acPassthrough=weakCharger&&!manageAC;
     if(!dryRun) {
         DWORD e=guardian();if(e){fail(e,L"Recovery companion could not start");return;}
         e=power.restore();if(e){fail(e,L"Previous settings could not be recovered");return;}
-        e=power.capture(sample.battery?2:1);if(e){fail(e,power.captureIssue.empty()?L"Original settings could not be saved":power.captureIssue);return;}
+        e=power.capture(windowsAc?1:2);if(e){fail(e,power.captureIssue.empty()?L"Original settings could not be saved":power.captureIssue);return;}
         e=power.configure();if(e==ERROR_RETRY){DWORD restored=power.restore();if(restored){fail(restored,L"Source change recovery failed");return;}PostMessageW(window,WM_POWERBROADCAST,PBT_APMPOWERSTATUSCHANGE,0);return;}if(e){fail(e,L"Windows did not accept the requested settings");return;}
     }
-    enabled=true;environment();appliedOnBattery=sample.battery;policy.reset(sample.now);compute.reset();processMonitor.clear();lastComputeSample=0;previousAccounting=sample.now;
+    enabled=!power.acPassthrough;bridging=power.acPassthrough;environment();appliedOnBattery=sample.battery;appliedWindowsAc=windowsAc;policy.reset(sample.now);compute.reset();processMonitor.clear();lastComputeSample=0;previousAccounting=sample.now;
+    if(bridging){logEvent(L"Weak charger: AC profile temporarily mapped to Windows DC settings; adaptive AC control remains off");setTimer();updateUi();return;}
     foregroundHook=SetWinEventHook(EVENT_SYSTEM_FOREGROUND,EVENT_SYSTEM_FOREGROUND,nullptr,foregroundEvent,0,0,WINEVENT_OUTOFCONTEXT);
     if(!foregroundHook)logEvent(L"Foreground notifications unavailable; periodic fallback remains active");
     foregroundPid=0;setForeground(GetForegroundWindow(),false);registerInput(!sample.blocked);
@@ -286,7 +299,7 @@ static void turnOff(bool fromFailure) {
     placementController.release();
     finishBenchmark();
     if(burstAppliedAt){burstMs+=GetTickCount64()-burstAppliedAt;burstAppliedAt=0;}
-    enabled=false;armed=false;policy.burst=false;compute.reset();processMonitor.clear();schedulerEvent();
+    enabled=false;bridging=false;armed=false;policy.burst=false;compute.reset();processMonitor.clear();schedulerEvent();
     if(foregroundHook)UnhookWinEvent(foregroundHook);foregroundHook=nullptr;
     if(titleHook)UnhookWinEvent(titleHook);titleHook=nullptr;
     if(editValueHook)UnhookWinEvent(editValueHook);editValueHook=nullptr;
@@ -295,6 +308,7 @@ static void turnOff(bool fromFailure) {
     if(!dryRun) {
         DWORD e=power.restore();if(e){fault=L"Restoration needs attention: Windows "+std::to_wstring(e)+L". Recovery file retained.";logEvent(fault);}
     }
+    power.dcUsesAcProfile=false;power.acPassthrough=false;
     if(foregroundProcess)CloseHandle(foregroundProcess);foregroundProcess=nullptr;foregroundPid=0;previousForeground=previousCpu=0;
     if(!fromFailure)logEvent(L"Paused; owned settings restored, newer external choices preserved");
     setTimer();updateUi();
@@ -318,14 +332,14 @@ static void finishBenchmark() {
 static void powerEvent();
 static void tick() {
     bool oldBlocked=sample.blocked;environment();
-    if(!enabled){if(armed&&(sample.battery||manageAC))turnOn();setTimer();return;}
-    if(appliedOnBattery!=sample.battery){powerEvent();return;}
+    if((enabled||bridging)&&(appliedOnBattery!=sample.battery||appliedWindowsAc!=windowsAc)){powerEvent();return;}
+    if(!enabled){if(armed&&(sample.battery||manageAC||weakCharger))turnOn();setTimer();return;}
     collect();
     if(benchmarkProcess&&(WaitForSingleObject(benchmarkProcess,0)!=WAIT_TIMEOUT||sample.now>=benchmarkDeadline))finishBenchmark();
     if(enabled) {
         // Compare with the applied source, not the latest sensor sample: a timer
         // may observe a charger change before its Windows notification arrives.
-        if(appliedOnBattery!=sample.battery){powerEvent();return;}
+        if(appliedOnBattery!=sample.battery||appliedWindowsAc!=windowsAc){powerEvent();return;}
         if(oldBlocked!=sample.blocked)registerInput(!sample.blocked);
         if(!sample.blocked)setForeground(GetForegroundWindow(),false);
         PowerState before=state();
@@ -356,7 +370,7 @@ static uint64_t ownCpu() {FILETIME c{},e{},k{},u{};GetProcessTimes(GetCurrentPro
 static std::wstring runtimeReport() {
     PROCESS_MEMORY_COUNTERS_EX memory{};GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory),sizeof(memory));
     uint64_t elapsed=GetTickCount64()-launchTime;double cpuMs=(ownCpu()-cpuAtStart)/10000.0;
-    std::wostringstream out;out<<power.report()<<L"\nRuntime\nMode: "<<(dryRun?L"Observation (no writes)":enabled?L"Controlling":L"Paused")
+    std::wostringstream out;out<<power.report()<<L"\nRuntime\nMode: "<<(dryRun?L"Observation (no writes)":bridging?L"AC profile on weak charger":enabled?L"Controlling":L"Paused")
         <<L"\nArmed: "<<(armed?L"yes":L"no")<<L"\nPlugged-in control: "<<(manageAC?L"on":L"off")
         <<L"\nPower state: "<<(state()==PowerState::Burst?L"Burst":state()==PowerState::Compute?L"Compute":enabled?L"Efficiency":armed?L"Waiting for battery":L"Restored")
         <<L"\nCompute CPU percent of one core: "<<fixed(processMonitor.cpu)
@@ -378,6 +392,7 @@ static std::wstring runtimeReport() {
         <<L"\nWindow paints: "<<paintCount<<L"\nButton paints: "<<buttonPaintCount
         <<L"\nWindows accessibility queries: "<<accessibilityRequests
         <<L"\nPower value writes: "<<power.writes<<L"\nLast power transition ms: "<<fixed(power.lastApplyMs)
+        <<L"\nActive-plan commits: "<<power.planCommits
         <<L"\nForeground notification: "<<(foregroundHook?L"active":L"off")<<L"\nKeyboard navigation: "<<(keyboardRegistered?L"active":L"off")
         <<L"\nRecovery companion: "<<(guardianProcess&&WaitForSingleObject(guardianProcess,0)==WAIT_TIMEOUT?L"waiting":L"off")
         <<L"\nFault: "<<fault<<L"\n\nRecent decisions (no keys, titles, URLs or audio recorded)\n";
@@ -387,14 +402,15 @@ static std::wstring runtimeReport() {
         for(uint64_t i=traceCount>traces.size()?traceCount-traces.size():0;i<traceCount;++i){const auto& t=traces[i%traces.size()];
             out<<i<<L","<<fixed(t.begin,4)<<L","<<fixed(t.end,4)<<L","<<t.source<<L","<<t.burst<<L","<<t.accepted<<L","<<t.error<<L"\n";}
     }
-    out<<efficiencyOptions.report();
+    out<<efficiencyOptions.report()<<pcieGuard.report()<<supplyMonitor.report()
+       <<L"Weak-charger recognition: "<<recognizeWeak<<L"; detected: "<<weakCharger<<L"; AC profile bridge: "<<bridging<<L"\n";
     return out.str();
 }
 static void setLabel(size_t i,const std::wstring& text) {
     wchar_t old[1024];GetWindowTextW(labels[i],old,1024);if(text!=old)SetWindowTextW(labels[i],text.c_str());
 }
 static void updateTray() {
-    std::wstring tip=L"Pulse - ";tip+=!fault.empty()?L"Needs attention":!enabled?(armed?L"Waiting for battery":L"Paused"):compute.active?L"Productive work / Best performance":policy.burst?L"Short performance burst":L"Best efficiency / boost disabled";
+    std::wstring tip=L"Pulse - ";tip+=!fault.empty()?L"Needs attention":bridging?L"Weak charger / AC profile":!enabled?(armed?L"Waiting for battery":L"Paused"):compute.active?L"Productive work / Best performance":policy.burst?L"Short performance burst":L"Best efficiency / boost disabled";
     if(tip==lastTrayTip)return;lastTrayTip=tip;
     wcsncpy_s(tray.szTip,tip.c_str(),_TRUNCATE);Shell_NotifyIconW(NIM_MODIFY,&tray);
 }
@@ -406,7 +422,12 @@ static void updateUi() {
     setLabel(5,!enabled?L"WINDOWS  /  restored":state()==PowerState::Burst?L"WINDOWS  /  best performance":compute.active?L"WINDOWS  /  best performance":L"WINDOWS  /  best power efficiency");
     setLabel(6,!enabled?L"CPU BOOST  /  restored":power.cpuOptions.boostDisabled(!sample.battery)?L"CPU BOOST  /  disabled by option":state()==PowerState::Burst?L"CPU BOOST  /  aggressive":compute.active?L"CPU BOOST  /  efficient aggressive":L"CPU BOOST  /  disabled");
     SYSTEM_POWER_STATUS s{};GetSystemPowerStatus(&s);
-    setLabel(7,std::wstring(s.ACLineStatus==1?L"PLUGGED IN":L"ON BATTERY")+(s.BatteryLifePercent<=100?L"  ·  "+std::to_wstring(s.BatteryLifePercent)+L"%":L""));
+    setLabel(7,std::wstring(weakCharger?L"WEAK CHARGER":s.ACLineStatus==1?L"PLUGGED IN":L"ON BATTERY")+(s.BatteryLifePercent<=100?L"  ·  "+std::to_wstring(s.BatteryLifePercent)+L"%":L""));
+    if(bridging&&fault.empty()) {
+        setLabel(2,L"EXTERNAL POWER DETECTED");setLabel(3,L"Your AC profile is active.");
+        setLabel(4,L"Weak charger connected. Battery settings will return when unplugged.");
+        setLabel(5,L"WINDOWS  /  AC preference");setLabel(6,L"CPU BOOST  /  AC preference");
+    }
     setLabel(12,L"Short boosts  "+std::to_wstring(bursts)+L"     ·     Burst limit  "+(sample.battery?L"1.8 seconds":L"2.4 seconds"));
     setLabel(13,schedulerGuard.status());
     setLabel(14,L"G Helper keeps fans, GPU, charge limit and hardware power limits.\nClose this window to keep Pulse in the system tray.");
@@ -501,7 +522,11 @@ static void trayMenu() {
 }
 static void efficiencyMenu() {
     HMENU menu=CreatePopupMenu();if(!menu)return;
-    AppendMenuW(menu,MF_STRING|MF_DISABLED,0,L"Selections remembered · applies on battery and AC");
+    AppendMenuW(menu,MF_STRING|MF_DISABLED,0,L"Selections remembered · PCIe applies on battery only");
+    AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
+    AppendMenuW(menu,MF_STRING|(pcieGuard.enabled()?MF_CHECKED:0),4,L"Keep PCIe maximum power savings on battery");
+    AppendMenuW(menu,MF_STRING|MF_DISABLED,0,pcieGuard.status().c_str());
+    AppendMenuW(menu,MF_STRING|(recognizeWeak?MF_CHECKED:0),5,L"Use AC profile with a weak charger");
     AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
     AppendMenuW(menu,MF_STRING|(efficiencyOptions.selected(efficiency::Option::Update)?MF_CHECKED:0),1,L"Keep Windows Update service off");
     AppendMenuW(menu,MF_STRING|(efficiencyOptions.selected(efficiency::Option::Realtime)?MF_CHECKED:0),2,L"Keep Defender real-time protection off");
@@ -514,11 +539,23 @@ static void efficiencyMenu() {
         DWORD e=efficiencyOptions.toggle(window,selected==1?efficiency::Option::Update:efficiency::Option::Realtime);
         if(e)logEvent(L"Efficiency helper could not start: "+std::to_wstring(e));
         updateUi();
+    }else if(selected==4){
+        if(dryRun){MessageBoxW(window,L"PCIe enforcement is unavailable in observation/test mode.",L"Pulse",MB_OK);return;}
+        const DWORD e=pcieGuard.toggle();
+        if(e)logEvent(L"PCIe preference could not be saved: "+std::to_wstring(e));
+        updateUi();
+    }else if(selected==5){
+        if(dryRun)return;
+        const bool next=!recognizeWeak;
+        if(!WritePrivateProfileStringW(L"Preferences",L"RecognizeWeakCharger",next?L"1":L"0",(appFolder()+L"\\Pulse.ini").c_str())){logEvent(L"Could not save weak-charger preference");return;}
+        recognizeWeak=next;powerEvent();updateUi();
     }else if(selected==3){
         MessageBoxW(window,L"Each check requests a machine-wide setting. Selections are remembered. The installed broker runs with administrator rights without repeated prompts; portable mode asks once per session.\n\n"
+            L"PCIe: enabled by default. Enforce maximum link power savings in the active plan's battery setting. AC values are never written. Works independently of CPU Pause. Unchecking or exiting stops the watcher but retains this permanent battery preference. Startup resumes the saved selection. Hardware support still determines actual link states.\n\n"
+            L"Weak charger: recognize supported ASUS charger status or the Windows charging flag. Temporarily apply your AC profile to the settings Windows actually uses, with battery restoration on unplug, Pause or exit. The plugged-in control button still determines whether AC boost is adaptive. This does not increase charger wattage or stop battery discharge.\n\n"
             L"Update: stop and disable wuauserv; watch for changes. This delays updates and may affect Store/other update clients. It does not undo updates already installed or stop all servicing.\n\n"
             L"Real-time: request Defender real-time protection off and verify it. Files will not receive normal real-time scanning. Tamper Protection and organization policies are respected; a blocked request is shown explicitly.\n\n"
-            L"Both controls restore captured settings when unchecked or on Restore & exit, including recovery after the main app crashes. Saved selections resume next time Pulse starts. Pause only pauses CPU power control.\n\n"
+            L"The Update and Real-time controls restore captured settings when unchecked or on Restore & exit, including recovery after the main app crashes. Saved selections resume next time Pulse starts. Pause only pauses CPU power control.\n\n"
             L"Corrections are automatic. Repeated conflicts use a 30-second retry backoff to avoid wasting CPU. Tamper Protection is not bypassed. If restoration fails, the protected recovery journal is retained for retry on restart. Windows can still override these controls.",L"Pulse — Efficiency options",MB_OK|MB_ICONINFORMATION);
     }
 }
@@ -527,6 +564,8 @@ static void cleanup() {
     if(!reportOnExit.empty())saveText(reportOnExit,runtimeReport());
     turnOff(false);Shell_NotifyIconW(NIM_DELETE,&tray);
     efficiencyOptions.stop();
+    pcieGuard.stop();
+    supplyMonitor.stop();
     if(displayNotification)UnregisterPowerSettingNotification(displayNotification);
     if(sourceNotification)UnregisterPowerSettingNotification(sourceNotification);
     if(schemeNotification)UnregisterPowerSettingNotification(schemeNotification);
@@ -536,12 +575,12 @@ static void cleanup() {
     DeleteObject(regular);DeleteObject(fontSmall);DeleteObject(heading);DeleteObject(hero);DeleteObject(bold);DeleteObject(backgroundBrush);DeleteObject(cardBrush);
 }
 static void powerEvent() {
-    environment();schedulerEvent();if(!armed)return;
-    bool shouldControl=sample.battery||manageAC;
-    if(enabled&&(!shouldControl||appliedOnBattery!=sample.battery)){
+    environment();schedulerEvent();if(!armed){setTimer();updateUi();return;}
+    bool shouldControl=sample.battery||manageAC||weakCharger;
+    if((enabled||bridging)&&(!shouldControl||appliedOnBattery!=sample.battery||appliedWindowsAc!=windowsAc||bridging!=(weakCharger&&!manageAC))){
         turnOff(false);if(!fault.empty())return;armed=true;
     }
-    if(shouldControl&&!enabled)turnOn();
+    if(shouldControl&&!enabled&&!bridging)turnOn();
     if(enabled){registerInput(!sample.blocked);
         if(sample.blocked&&(policy.burst||compute.active)){policy.reset(sample.now);compute.reset();applyState();}}
     setTimer();updateUi();
@@ -549,6 +588,8 @@ static void powerEvent() {
 static LRESULT CALLBACK procedure(HWND h,UINT m,WPARAM w,LPARAM l) {
     if(m==taskbarCreated&&taskbarCreated) {Shell_NotifyIconW(NIM_ADD,&tray);return 0;}
     switch(m) {
+    case supply::ChangedMessage:if(w)supplyMonitor.failed(static_cast<HRESULT>(l));supplyMonitor.notify(true);return 0;
+    case pcie::ChangedMessage:pcieGuard.notify();return 0;
     case efficiency::ChangedMessage:updateUi();return 0;
     case WM_CREATE:window=h;processMonitor.attach(h,ProductiveExitMsg);return 0;
     case EditIntentMsg:editIntent();return 0;
@@ -568,23 +609,27 @@ static LRESULT CALLBACK procedure(HWND h,UINT m,WPARAM w,LPARAM l) {
         if(schedulerGuard.enabled()&&schedulerTopologyDirty){schedulerGuard.refresh();schedulerTopologyDirty=false;}
         if(placementController.enabled&&!dryRun)placementController.topology(scheduler::discoverTopology());
         schedulerEvent();updateUi();return 0;
-    case WM_DEVICECHANGE:if(w==DBT_DEVNODES_CHANGED){schedulerRefresh();if(placementController.enabled&&!dryRun)placementController.topology(scheduler::discoverTopology());}break;
+    case WM_DEVICECHANGE:if(w==DBT_DEVNODES_CHANGED){if(!dryRun)supplyMonitor.notify(true);schedulerRefresh();if(placementController.enabled&&!dryRun)placementController.topology(scheduler::discoverTopology());}break;
     case WM_HSCROLL:{int id=GetDlgCtrlID(reinterpret_cast<HWND>(l));if(id==UvPSlider||id==UvESlider)setControlText(id==UvPSlider?UvP:UvE,std::to_wstring(SendMessageW(reinterpret_cast<HWND>(l),TBM_GETPOS,0,0)));return 0;}
     case WM_INPUT:rawKeyboard(l);return DefWindowProcW(h,m,w,l);
     case WM_TIMER:
+        if(w==supply::RefreshTimer||w==supply::SettleTimer){supplyMonitor.timer(w);powerEvent();return 0;}
+        if(w==pcie::GuardTimer){pcieGuard.timer();return 0;}
         if(w==TickTimer)tick();else if(w==StopTimer)SendMessageW(h,QuitMsg,0,0);
-        else if(w==CheckTimer){KillTimer(h,CheckTimer);if(enabled&&!dryRun&&GetTickCount64()-lastApplied>700){DWORD e=power.verify(state(),true);if(e)fail(e,L"External power setting changed; Pulse paused to avoid a conflict");}}
+        else if(w==CheckTimer){KillTimer(h,CheckTimer);if((enabled||bridging)&&!dryRun&&GetTickCount64()-lastApplied>700){DWORD e=power.verify(state(),true);if(e)fail(e,L"External power setting changed; Pulse paused to avoid a conflict");}}
         return 0;
     case EventMsg:
         if(w==0&&enabled)setForeground(reinterpret_cast<HWND>(l),true);
         else if(enabled&&browserForeground&&GetTickCount64()-lastNav>3000&&inputAge()<1200) {lastNav=GetTickCount64();requestBurst(Signal::Navigation,L"Title navigation");}return 0;
     case WM_POWERBROADCAST:
+        if(!dryRun&&w!=PBT_APMSUSPEND)pcieGuard.notify();
+        if(!dryRun&&(w==PBT_APMPOWERSTATUSCHANGE||w==PBT_APMRESUMEAUTOMATIC||w==PBT_APMRESUMESUSPEND))supplyMonitor.notify(true);
         if(w==PBT_APMSUSPEND){suspended=true;powerEvent();}
         else if(w==PBT_APMRESUMEAUTOMATIC||w==PBT_APMRESUMESUSPEND){suspended=false;previousCpu=previousForeground=0;schedulerRefresh();if(placementController.enabled&&!dryRun)placementController.topology(scheduler::discoverTopology());powerEvent();}
         else if(w==PBT_APMPOWERSTATUSCHANGE)powerEvent();
         else if(w==PBT_POWERSETTINGCHANGE){auto* p=reinterpret_cast<POWERBROADCAST_SETTING*>(l);
             if(p->PowerSetting==GUID_CONSOLE_DISPLAY_STATE&&p->DataLength==sizeof(DWORD)){DWORD value;memcpy(&value,p->Data,sizeof(value));displayOff=value==0;powerEvent();}
-            else if(p->PowerSetting==GUID_ACDC_POWER_SOURCE||p->PowerSetting==GUID_POWER_SAVING_STATUS)powerEvent();
+            else if(p->PowerSetting==GUID_ACDC_POWER_SOURCE||p->PowerSetting==GUID_POWER_SAVING_STATUS){if(!dryRun&&p->PowerSetting==GUID_ACDC_POWER_SOURCE)supplyMonitor.notify(true);powerEvent();}
             else if(p->PowerSetting==GUID_ACTIVE_POWERSCHEME)SetTimer(h,CheckTimer,1000,nullptr);
         }return TRUE;
     case WM_WTSSESSION_CHANGE:if(w==WTS_SESSION_LOCK)locked=true;else if(w==WTS_SESSION_UNLOCK)locked=false;powerEvent();return 0;
@@ -674,6 +719,7 @@ static int exercise(const std::wstring& output) {
     DWORD restore=power.restore();report<<L"Restore result: "<<restore<<L"\nAFTER\n"<<power.report();
     if(!saveText(output,report.str()))return ERROR_WRITE_FAULT;return static_cast<int>(e?e:restore);
 }
+#include "idle_exercise.inl"
 static int cpuOptionsExercise(const std::wstring& output) {
     // Manual integration check: no preference writes; guardian owns crash recovery.
     std::wostringstream report;report<<L"CPU options policy exercise; hardware C-states not tested\n";
@@ -691,11 +737,23 @@ static int cpuOptionsExercise(const std::wstring& output) {
         if(error)break;
         const auto snapshot=power.saved;
         SYSTEM_POWER_STATUS source{};GetSystemPowerStatus(&source);
+        unsigned staticChanges=0,dynamicChanges=0;
+        for(DWORD i=0;i<snapshot.count;++i){
+            const auto& row=snapshot.rows[i];
+            for(bool ac:{true,false})if(row.mask&(ac?1:2))
+                if((ac?row.ac:row.dc)!=(ac?row.targetAc:row.targetDc))
+                    ++(settings()[row.setting].dynamic?dynamicChanges:staticChanges);
+        }
+        const auto commitsBefore=power.planCommits;
         // apply() is intentionally refused for the inactive source. Configure
         // still exercises static writes, followed immediately by restoration.
         error=power.configure();
         const bool inactive=!(mask&(source.ACLineStatus==1?1u:2u));
         if(error==ERROR_RETRY&&inactive)error=0;
+        const auto expectedCommits=(staticChanges||dynamicChanges)?1u:0u;
+        if(!error&&power.planCommits-commitsBefore!=expectedCommits)error=ERROR_INVALID_STATE;
+        report<<L"Configure static changes="<<staticChanges<<L" dynamic changes="<<dynamicChanges
+              <<L" commits="<<power.planCommits-commitsBefore<<L"\n";
         report<<L"Configure: "<<error<<L"; inactive source: "<<inactive<<L"\n";
         for(DWORD i=0;i<snapshot.count&&!error;++i) {
             const auto &row=snapshot.rows[i];
@@ -723,6 +781,51 @@ static int cpuOptionsExercise(const std::wstring& output) {
     const DWORD restored=power.restore();if(!error)error=restored;
     power.cpuOptions=originalOptions;
     report<<L"Final result: "<<error<<L"\n"<<power.report();
+    if(!saveText(output,report.str()))return ERROR_WRITE_FAULT;
+    return static_cast<int>(error);
+}
+static int chargerExercise(const std::wstring& output) {
+    std::wostringstream report;report<<L"Weak-charger AC-to-DC transaction exercise\n";
+    SYSTEM_POWER_STATUS source{};
+    if(!GetSystemPowerStatus(&source)||source.ACLineStatus!=0)return ERROR_NOT_READY;
+    DWORD error=guardian();if(!error)error=power.restore();
+    power.profiles.ac.cores=23;power.profiles.ac.minimum=67;
+    power.profiles.dc.cores=19;power.profiles.dc.minimum=21;
+    power.cpuOptions=cpu::Options{};
+    power.cpuOptions.epp=power.optionAvailable(8,2);
+    power.cpuOptions.acEpp=43;power.cpuOptions.dcEpp=81;
+    for(bool adaptive:{false,true}) {
+        if(error)break;
+        power.dcUsesAcProfile=true;power.acPassthrough=!adaptive;
+        power.cpuOptions.disableBoostAc=adaptive;power.cpuOptions.disableBoostDc=false;
+        error=power.capture(2);const auto saved=power.saved;
+        if(!error)error=power.configure();
+        if(!error&&adaptive)error=power.apply(PowerState::Compute);
+        if(!error)error=power.verify(adaptive?PowerState::Compute:PowerState::Efficiency,true);
+        for(DWORD i=0;i<saved.count&&!error;++i) {
+            const auto& row=saved.rows[i];DWORD ac=0,dc=0;
+            error=power.read(row.scheme,row.setting,true,ac);
+            if(!error)error=power.read(row.scheme,row.setting,false,dc);
+            if(!error&&(ac!=row.ac||row.mask!=2))error=ERROR_INVALID_STATE;
+            if(!error&&row.setting==1&&dc!=23)error=ERROR_INVALID_STATE;
+            if(!error&&row.setting==3&&dc!=67)error=ERROR_INVALID_STATE;
+            if(!error&&row.setting==8&&dc!=43)error=ERROR_INVALID_STATE;
+            if(!error&&row.setting==0&&dc!=(adaptive?0:row.ac))error=ERROR_INVALID_STATE;
+        }
+        GUID acMode{};if(!error)error=power.mode(true,acMode);
+        if(!error&&acMode!=saved.acMode)error=ERROR_INVALID_STATE;
+        report<<(adaptive?L"Adaptive AC profile + AC boost-disable precedence":L"AC passthrough profile and boost")<<L": "<<error<<L"\n";
+        const DWORD restore=power.restore();if(!error)error=restore;
+        for(DWORD i=0;i<saved.count&&!error;++i) {
+            const auto& row=saved.rows[i];DWORD value=0;error=power.read(row.scheme,row.setting,false,value);
+            if(!error&&value!=row.dc)error=ERROR_INVALID_STATE;
+        }
+        GUID dcMode{};if(!error)error=power.mode(false,dcMode);
+        if(!error&&dcMode!=saved.dcMode)error=ERROR_INVALID_STATE;
+        report<<L"Exact DC restoration / unchanged AC: "<<error<<L"\n";
+    }
+    const DWORD restore=power.restore();if(!error)error=restore;
+    report<<L"Final result: "<<error<<L"; journal remains: "<<power.hasJournal()<<L"\n";
     if(!saveText(output,report.str()))return ERROR_WRITE_FAULT;
     return static_cast<int>(error);
 }
@@ -769,6 +872,11 @@ static int schedulerGuiTest(HINSTANCE instance,const std::wstring& output) {
     SendMessageW(window,WM_COMMAND,IdleOpen,0);
     setControlText(IdleDcDemote,L"101");const bool idleReject=currentPage==4&&!applyIdleUi();populateIdle(power.cpuOptions);
     const bool idlePreview=applyIdleUi()&&power.writes==0;
+    setControlText(IdleInterval,L"99");const bool intervalReject=!applyIdleUi();
+    setControlText(IdleInterval,L"100");const auto intervalDraft=capturePageDrafts();
+    populateIdle(power.cpuOptions);restorePageDrafts(intervalDraft);
+    const bool intervalDraftRestored=controlText(IdleInterval)==L"100";
+    const bool intervalControl=GetDlgItem(window,IdleEarly)&&GetDlgItem(window,IdleInterval);
     RECT cpuTab{},effButton{};GetWindowRect(GetDlgItem(window,PageCpu),&cpuTab);GetWindowRect(GetDlgItem(window,EfficiencyButton),&effButton);
     const bool cpuLayout=cpuTab.right<effButton.left;
     SendMessageW(window,WM_COMMAND,PageHome,0);
@@ -779,7 +887,7 @@ static int schedulerGuiTest(HINSTANCE instance,const std::wstring& output) {
     const bool saved=saveText(output,report.str());
     for(auto f:{regular,fontSmall,heading,hero,bold})DeleteObject(f);
     DeleteObject(backgroundBrush);DeleteObject(cardBrush);DestroyWindow(window);window=nullptr;
-    return defaultOff&&off&&offText&&on&&onText&&layout&&noPowerWrites&&efficiencyDefault&&efficiencyLayout&&powerPage&&invalidRejected&&previewValidated&&uvPage&&cpuPage&&cpuReject&&cpuPreview&&cpuDraftRestored&&idleReject&&idlePreview&&cpuLayout&&saved?0:4;
+    return defaultOff&&off&&offText&&on&&onText&&layout&&noPowerWrites&&efficiencyDefault&&efficiencyLayout&&powerPage&&invalidRejected&&previewValidated&&uvPage&&cpuPage&&cpuReject&&cpuPreview&&cpuDraftRestored&&idleReject&&idlePreview&&cpuLayout&&intervalReject&&intervalDraftRestored&&intervalControl&&saved?0:4;
 }
 static int efficiencyPreview(HINSTANCE instance) {
     dryRun=true;autoStart=false;armed=enabled=false;
@@ -834,7 +942,14 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int) {
     if(wait!=WAIT_OBJECT_0&&wait!=WAIT_ABANDONED) {HWND h=FindWindowW(ClassName,nullptr);if(h){ShowWindow(h,SW_SHOW);SetForegroundWindow(h);}CloseHandle(singleton);return 0;}
     if(has(L"--restore")){DWORD p=placement::recover(appFolder());int e=static_cast<int>(power.restore());ReleaseMutex(singleton);CloseHandle(singleton);return e?e:static_cast<int>(p);}
     if(has(L"--exercise")){int e=exercise(value(L"--exercise"));ReleaseMutex(singleton);CloseHandle(singleton);return e;}
+    if(has(L"--charger-exercise")){int e=chargerExercise(value(L"--charger-exercise"));ReleaseMutex(singleton);CloseHandle(singleton);return e;}
     if(has(L"--cpu-options-exercise")){int e=cpuOptionsExercise(value(L"--cpu-options-exercise"));ReleaseMutex(singleton);CloseHandle(singleton);return e;}
+    if(has(L"--idle-interval-comparison")){int e=idleIntervalComparison(value(L"--idle-interval-comparison"));ReleaseMutex(singleton);CloseHandle(singleton);return e;}
+    if(has(L"--idle-interval-exercise")||has(L"--idle-interval-crash")){
+        const bool crash=has(L"--idle-interval-crash");
+        int e=idleIntervalExercise(value(crash?L"--idle-interval-crash":L"--idle-interval-exercise"),crash);
+        ReleaseMutex(singleton);CloseHandle(singleton);return e;
+    }
     DWORD placementRecovery=placement::recover(appFolder());
     if(placementRecovery)profileMessage=L"Scheduler recovery needs attention (Windows "+std::to_wstring(placementRecovery)+L"). New placements are off.";
     placementController.enabled=!placementRecovery&&GetPrivateProfileIntW(L"Preferences",L"PlacementEnabled",0,(appFolder()+L"\\Pulse.ini").c_str())!=0;
@@ -842,11 +957,14 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int) {
     schedulerGuard.enabled(scheduler::loadSchedulerPreference(schedulerIni()));
     if(schedulerGuard.enabled()){schedulerGuard.refresh();schedulerTopologyDirty=false;}
     manageAC=GetPrivateProfileIntW(L"Preferences",L"ManageAC",0,(appFolder()+L"\\Pulse.ini").c_str())!=0;
+    recognizeWeak=GetPrivateProfileIntW(L"Preferences",L"RecognizeWeakCharger",1,(appFolder()+L"\\Pulse.ini").c_str())!=0;
     if(has(L"--manage-ac"))manageAC=true; // One-run override for the local verification tool.
     wchar_t computeApps[4096];GetPrivateProfileStringW(L"Preferences",L"ComputeApps",L"",computeApps,4096,(appFolder()+L"\\Pulse.ini").c_str());processMonitor.configure(computeApps);
     dryRun=has(L"--dry-run");reportOnExit=value(L"--report");autoStart=!has(L"--paused");
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_STANDARD_CLASSES|ICC_BAR_CLASSES};InitCommonControlsEx(&controls);
+    CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
+    CoInitializeSecurity(nullptr,-1,nullptr,nullptr,RPC_C_AUTHN_LEVEL_DEFAULT,RPC_C_IMP_LEVEL_IMPERSONATE,nullptr,EOAC_NONE,nullptr);
+    INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_STANDARD_CLASSES|ICC_BAR_CLASSES};InitCommonControlsEx(&controls);
     // Ask Windows to ignore this process for timer-resolution requests made elsewhere.
     PROCESS_POWER_THROTTLING_STATE throttling{PROCESS_POWER_THROTTLING_CURRENT_VERSION,PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION};
     SetProcessInformation(GetCurrentProcess(),ProcessPowerThrottling,&throttling,sizeof(throttling));
@@ -867,6 +985,8 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int) {
     WTSRegisterSessionNotification(window,NOTIFY_FOR_THIS_SESSION);
     if(!has(L"--hidden"))ShowWindow(window,SW_SHOW);
     if(!dryRun){DWORD e=efficiencyOptions.resume(window);if(e)logEvent(L"Efficiency options could not resume: "+std::to_wstring(e));}
+    if(!dryRun)pcieGuard.start(window,appFolder()+L"\\Pulse.ini");
+    if(!dryRun)supplyMonitor.start(window);
     environment();if(!dryRun){DWORD e=power.restore();if(e){fault=L"Previous settings need recovery: "+std::to_wstring(e);autoStart=false;}}if(autoStart)turnOn();else updateUi();setTimer();
     auto seconds=value(L"--seconds");if(!seconds.empty()){unsigned long duration=wcstoul(seconds.c_str(),nullptr,10);if(duration>0&&duration<=3600)SetTimer(window,StopTimer,duration*1000,nullptr);}
     MSG message;while(GetMessageW(&message,nullptr,0,0)>0){if(!IsDialogMessageW(window,&message)){TranslateMessage(&message);DispatchMessageW(&message);}}

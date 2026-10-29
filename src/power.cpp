@@ -32,7 +32,8 @@ const std::vector<Setting>& settings() {
         {GUID_PROCESSOR_PERF_ENERGY_PERFORMANCE_PREFERENCE_1,L"Windows EPP class 1",50,80,false},
         {GUID_PROCESSOR_IDLE_DEMOTE_THRESHOLD,L"Windows idle demotion threshold",12,40,false},
         {GUID_PROCESSOR_IDLE_PROMOTE_THRESHOLD,L"Windows idle promotion threshold",100,60,false},
-        {GUID_PROCESSOR_IDLE_STATE_MAXIMUM,L"Windows idle state maximum",0,0,false}
+        {GUID_PROCESSOR_IDLE_STATE_MAXIMUM,L"Windows idle state maximum",0,0,false},
+        {GUID_PROCESSOR_IDLE_TIME_CHECK,L"Windows idle policy interval (us)",50000,50000,true}
     }; return list;
 }
 static std::wstring journalPath() { return appFolder()+L"\\state\\restore.bin"; }
@@ -72,7 +73,13 @@ DWORD Power::write(const GUID& scheme,DWORD index,bool ac,DWORD value) {
     DWORD old=0; DWORD e=read(scheme,index,ac,old); if(e)return e; if(old==value)return ERROR_SUCCESS;
     e=ac?PowerWriteACValueIndex(nullptr,&scheme,&GUID_PROCESSOR_SETTINGS_SUBGROUP,&settings()[index].id,value):
         PowerWriteDCValueIndex(nullptr,&scheme,&GUID_PROCESSOR_SETTINGS_SUBGROUP,&settings()[index].id,value);
-    if(e)return e; ++writes; DWORD actual=0; e=read(scheme,index,ac,actual); return e?e:actual==value?ERROR_SUCCESS:ERROR_WRITE_FAULT;
+    if(e)return e; ++writes; commitPending=true;
+    DWORD actual=0; e=read(scheme,index,ac,actual); return e?e:actual==value?ERROR_SUCCESS:ERROR_WRITE_FAULT;
+}
+DWORD Power::commit(const GUID& scheme) {
+    const DWORD error=PowerSetActiveScheme(nullptr,&scheme);
+    if(!error){++planCommits;commitPending=false;}
+    return error;
 }
 bool Power::hasJournal()const { return GetFileAttributesW(journalPath().c_str())!=INVALID_FILE_ATTRIBUTES; }
 DWORD Power::saveJournal() {
@@ -93,7 +100,7 @@ DWORD Power::loadJournal(Snapshot& out)const {
     const DWORD size=GetFileSize(f,nullptr);
     bool ok=false;
     if(size==sizeof(out)) {
-        ok=ReadFile(f,&out,sizeof(out),&n,nullptr)&&n==sizeof(out)&&(out.version==3||out.version==4)&&out.checksum==checksum(out);
+        ok=ReadFile(f,&out,sizeof(out),&n,nullptr)&&n==sizeof(out)&&(out.version==3||out.version==4||out.version==5)&&out.checksum==checksum(out);
     } else if(size==sizeof(LegacySnapshot)) {
         LegacySnapshot old{};
         ok=ReadFile(f,&old,sizeof(old),&n,nullptr)&&n==sizeof(old)&&old.magic==0x50554C53&&
@@ -109,7 +116,10 @@ DWORD Power::loadJournal(Snapshot& out)const {
     CloseHandle(f);
     if(!ok||out.magic!=0x50554C53||out.count>48||out.count<6)return ERROR_INVALID_DATA;
     for(DWORD i=0;i<out.count;++i) {
-        const auto& r=out.rows[i]; if(r.setting>=settings().size()||(out.version<4&&r.setting>=8)||r.ac>100||r.dc>100||r.targetAc>100||r.targetDc>100||r.mask<1||r.mask>3)return ERROR_INVALID_DATA;
+        const auto& r=out.rows[i]; if(r.setting>=settings().size()||(out.version<4&&r.setting>=8)||(out.version<5&&r.setting>=13)||
+            !cpu::validJournalValue(r.setting,r.ac)||!cpu::validJournalValue(r.setting,r.dc)||
+            !cpu::validJournalValue(r.setting,r.targetAc)||!cpu::validJournalValue(r.setting,r.targetDc)||r.mask<1||r.mask>3)return ERROR_INVALID_DATA;
+        if(r.setting==13&&(r.mask!=2||r.scheme!=out.scheme))return ERROR_INVALID_DATA;
         if(r.scheme!=out.scheme&&r.scheme!=GUID_POWER_MODE_BEST_EFFICIENCY&&r.scheme!=GUID_POWER_MODE_BEST_PERFORMANCE)return ERROR_INVALID_DATA;
     }
     return 0;
@@ -119,28 +129,32 @@ bool Power::optionAvailable(DWORD index, DWORD sourceMask) const {
     GUID scheme{};if(activeScheme(scheme))return false;
     if((explicitMask(scheme,index)&sourceMask)!=sourceMask)return false;
     for(bool ac:{true,false})if(sourceMask&(ac?1:2)) {
-        DWORD value=0;if(read(scheme,index,ac,value)||value>100)return false;
+        DWORD value=0;if(read(scheme,index,ac,value)||!cpu::validJournalValue(index,value))return false;
     }
     return true;
 }
 DWORD Power::capture(DWORD sourceMask, bool includeCpuOptions) {
     captureIssue.clear();
     if(sourceMask<1||sourceMask>3)return ERROR_INVALID_PARAMETER;
+    if((dcUsesAcProfile&&sourceMask!=2)||(acPassthrough&&!dcUsesAcProfile))return ERROR_INVALID_PARAMETER;
     if(hasJournal())return ERROR_ALREADY_EXISTS;
     if(!available())return ERROR_CALL_NOT_IMPLEMENTED;
     if(!cpuOptions.valid())return ERROR_INVALID_PARAMETER;
+    commitPending=false;
     saved=Snapshot{}; saved.owner=GetCurrentProcessId(); DWORD e=activeScheme(saved.scheme); if(e)return e;
     e=mode(true,saved.acMode); if(e)return e; e=mode(false,saved.dcMode); if(e)return e;
     for(const GUID& scheme:{saved.scheme,GUID_POWER_MODE_BEST_EFFICIENCY,GUID_POWER_MODE_BEST_PERFORMANCE}) {
         for(DWORD i=0;i<settings().size();++i) {
             if(i>=8&&(!includeCpuOptions||!cpuOptions.manages(i)))continue;
+            if(i==13&&(!(sourceMask&2)||dcUsesAcProfile))continue;
             if(i>=10&&scheme!=saved.scheme)continue;
             Row r{scheme,i,0,0,explicitMask(scheme,i),profiles.value(i,true),profiles.value(i,false)};
             if(i>=8) {
                 r.targetAc=cpuOptions.value(i,true);r.targetDc=cpuOptions.value(i,false);
                 // Only take ownership of existing overrides. Never create an
                 // inherited value that the recovery journal cannot remove.
-                if(scheme==saved.scheme&&i!=9&&(r.mask&sourceMask)!=sourceMask) {
+                const DWORD required=i==13?2:sourceMask;
+                if(scheme==saved.scheme&&i!=9&&(r.mask&required)!=required) {
                     captureIssue=std::wstring(settings()[i].name)+L" needs explicit plan values. Disable this custom option to resume.";
                     return ERROR_NOT_SUPPORTED;
                 }
@@ -155,6 +169,18 @@ DWORD Power::capture(DWORD sourceMask, bool includeCpuOptions) {
             }
             auto a=read(scheme,i,true,r.ac),d=read(scheme,i,false,r.dc);
             if(a||d) { if(scheme==saved.scheme)return a?a:d; if(a==ERROR_FILE_NOT_FOUND&&d==ERROR_FILE_NOT_FOUND)continue; return a?a:d; }
+            if(i==13) {
+                if(!cpu::validJournalValue(i,r.ac)||!cpu::validJournalValue(i,r.dc)) {
+                    captureIssue=L"Idle policy interval has an invalid original; no settings changed.";
+                    return ERROR_INVALID_DATA;
+                }
+                r.mask=2;r.targetAc=r.ac;
+                r.targetDc=cpu::idleIntervalTarget(r.dc,cpuOptions.idleUs,PowerState::Efficiency,false,false);
+            }
+            if(dcUsesAcProfile) {
+                r.targetDc=r.targetAc;
+                if(i==0&&acPassthrough)r.targetDc=cpuOptions.disableBoostAc?0:r.ac;
+            }
             r.mask &= sourceMask; if(!r.mask)continue;
             if(saved.count>=48)return ERROR_BUFFER_OVERFLOW;
             saved.rows[saved.count++]=r;
@@ -181,7 +207,7 @@ DWORD Power::persistProfiles() {
             e=write(r.scheme,r.setting,ac,ac?r.targetAc:r.targetDc);if(e)break;
         }
     }
-    if(!e)e=PowerSetActiveScheme(nullptr,&saved.scheme);
+    if(!e)e=commit(saved.scheme);
     if(!e){GUID current{};e=activeScheme(current);if(!e&&current!=saved.scheme)e=ERROR_INVALID_STATE;}
     for(DWORD i=0;i<saved.count&&!e;++i){
         const auto& r=saved.rows[i];if(settings()[r.setting].dynamic)continue;
@@ -199,21 +225,21 @@ DWORD Power::apply(PowerState state) {
     if(!owned)return ERROR_INVALID_STATE;
     GUID current{}; DWORD e=activeScheme(current); if(e)return e; if(current!=saved.scheme)return ERROR_INVALID_STATE;
     LARGE_INTEGER begin,end,freq; QueryPerformanceCounter(&begin); QueryPerformanceFrequency(&freq);
-    bool boostChanged=false;
     for(DWORD i=0;i<saved.count;++i) {
         const auto& r=saved.rows[i]; if(!settings()[r.setting].dynamic)continue;
         for(bool ac:{true,false}) { if(!(r.mask&(ac?1:2)))continue; DWORD old=0; e=read(r.scheme,r.setting,ac,old); if(e)return e;
-            const DWORD boost=cpuOptions.boost(state,ac);
-            if(old!=boost)boostChanged=true;
-            e=write(r.scheme,r.setting,ac,boost); if(e)return e;
+            const DWORD targetValue=r.setting==13?cpu::idleIntervalTarget(ac?r.ac:r.dc,cpuOptions.idleUs,state,ac,dcUsesAcProfile):
+                acPassthrough?(ac?r.targetAc:r.targetDc):cpuOptions.boost(state,ac||dcUsesAcProfile);
+            if(old!=targetValue){e=write(r.scheme,r.setting,ac,targetValue);if(e)return e;}
         }
     }
-    // Writes to the active plan need one explicit commit (never spawn powercfg).
-    if(boostChanged||state==PowerState::Efficiency) { e=PowerSetActiveScheme(nullptr,&saved.scheme); if(e)return e; }
+    // Configure's static writes and changed dynamic values share one commit.
+    // Repeating a settled request does not reactivate an unchanged plan.
+    if(commitPending) { e=commit(saved.scheme); if(e)return e; }
     SYSTEM_POWER_STATUS status{}; if(!GetSystemPowerStatus(&status))return GetLastError();
     DWORD mask=0;for(DWORD i=0;i<saved.count;++i)mask|=saved.rows[i].mask;
     if(!(mask&(status.ACLineStatus==1?1:2)))return ERROR_RETRY;
-    GUID target=modeFor(state);
+    GUID target=acPassthrough?saved.acMode:modeFor(state);
     GUID old{}; e=mode(status.ACLineStatus==1,old); if(e)return e;
     if(old!=target) { e=setMode(status.ACLineStatus==1,target); if(e)return e; ++writes; }
     QueryPerformanceCounter(&end); lastApplyMs=1000.0*static_cast<double>(end.QuadPart-begin.QuadPart)/freq.QuadPart;
@@ -225,12 +251,13 @@ DWORD Power::verify(PowerState state,bool full)const {
     for(DWORD i=0;i<saved.count;++i) {
         const auto& r=saved.rows[i]; const auto& s=settings()[r.setting]; if(!full&&!s.dynamic)continue;
         for(bool ac:{true,false}) { if(!(r.mask&(ac?1:2)))continue; DWORD value=0; e=read(r.scheme,r.setting,ac,value); if(e)return e;
-            DWORD expected=s.dynamic?cpuOptions.boost(state,ac):(ac?r.targetAc:r.targetDc); if(value!=expected)return ERROR_INVALID_STATE;
+            DWORD expected=r.setting==13?cpu::idleIntervalTarget(ac?r.ac:r.dc,cpuOptions.idleUs,state,ac,dcUsesAcProfile):
+                s.dynamic&&!acPassthrough?cpuOptions.boost(state,ac||dcUsesAcProfile):(ac?r.targetAc:r.targetDc); if(value!=expected)return ERROR_INVALID_STATE;
         }
     }
     SYSTEM_POWER_STATUS status{}; if(!GetSystemPowerStatus(&status))return GetLastError();
     GUID requested{}; e=mode(status.ACLineStatus==1,requested); if(e)return e;
-    return requested==modeFor(state)?0:ERROR_INVALID_STATE;
+    return requested==(acPassthrough?saved.acMode:modeFor(state))?0:ERROR_INVALID_STATE;
 }
 DWORD Power::restore(DWORD expectedOwner) {
     if(!hasJournal()){owned=false;return 0;}
@@ -244,27 +271,27 @@ DWORD Power::restore(DWORD expectedOwner) {
             DWORD value=0; e=read(r.scheme,r.setting,ac,value); if(e){if(!firstError)firstError=e;continue;}
             const DWORD original=ac?r.ac:r.dc, target=ac?r.targetAc:r.targetDc;
             // Preserve a third party's newer value rather than silently undoing it.
-            if(value==target||(s.dynamic&&(value==0||value==2||(snap.version>=2&&value==4)))) { e=write(r.scheme,r.setting,ac,original); if(e&&!firstError)firstError=e; }
+            if(value==target||(r.setting==0&&s.dynamic&&(value==0||value==2||(snap.version>=2&&value==4)))) { e=write(r.scheme,r.setting,ac,original); if(e&&!firstError)firstError=e; }
         }
     }
     GUID active{}; e=activeScheme(active); if(e&&!firstError)firstError=e;
-    if(!e&&active==snap.scheme) { e=PowerSetActiveScheme(nullptr,&active); if(e&&!firstError)firstError=e; }
+    if(!e&&active==snap.scheme) { e=commit(active); if(e&&!firstError)firstError=e; }
     DWORD mask=0;for(DWORD i=0;i<snap.count;++i)mask|=snap.rows[i].mask;
     for(bool ac:{true,false}) {
         if(!(mask&(ac?1:2)))continue;
         GUID current{}; e=mode(ac,current); if(e){if(!firstError)firstError=e;continue;}
-        if(current==GUID_POWER_MODE_BEST_EFFICIENCY||current==GUID_POWER_MODE_BEST_PERFORMANCE||(snap.version>=2&&current==BalancedMode)) {
+        if(current==GUID_POWER_MODE_BEST_EFFICIENCY||current==GUID_POWER_MODE_BEST_PERFORMANCE||(snap.version>=2&&current==BalancedMode)||(!ac&&current==snap.acMode)) {
             e=setMode(ac,ac?snap.acMode:snap.dcMode); if(e&&!firstError)firstError=e;
         }
     }
-    if(!firstError) { if(!DeleteFileW(journalPath().c_str()))return GetLastError(); owned=false; }
+    if(!firstError) { if(!DeleteFileW(journalPath().c_str()))return GetLastError(); owned=false; commitPending=false; }
     return firstError;
 }
 std::wstring Power::report()const {
     std::wostringstream out; GUID plan{},ac{},dc{},effective{};
     auto p=activeScheme(plan),a=mode(true,ac),d=mode(false,dc),f=effectiveMode(effective);
     SYSTEM_POWER_STATUS status{}; GetSystemPowerStatus(&status);
-    out<<L"Pulse 1.4.1 - Windows power diagnostics\nNative power-mode API: "<<(available()?L"available":L"unavailable")
+    out<<L"Pulse 1.4.3.2 - Windows power diagnostics\nNative power-mode API: "<<(available()?L"available":L"unavailable")
        <<L"\nPower source: "<<(status.ACLineStatus==1?L"AC":status.ACLineStatus==0?L"Battery":L"Unknown")
        <<L"\nBattery: "<<(unsigned)status.BatteryLifePercent<<L"%\nEnergy Saver: "<<(unsigned)status.SystemStatusFlag
        <<L"\nPlan: "<<guidText(plan)<<L" ("<<p<<L")\nAC mode: "<<guidText(ac)<<L" ("<<a<<L")\nDC mode: "<<guidText(dc)<<L" ("<<d<<L")"
@@ -272,6 +299,8 @@ std::wstring Power::report()const {
        <<L"Custom EPP: "<<cpuOptions.epp<<L"; AC="<<cpuOptions.acEpp<<L"; DC="<<cpuOptions.dcEpp
        <<L"\nDisable boost: AC="<<cpuOptions.disableBoostAc<<L"; DC="<<cpuOptions.disableBoostDc
        <<L"\nCustom idle thresholds: "<<cpuOptions.idleThresholds<<L"; custom idle ceiling: "<<cpuOptions.idleLimit
+       <<L"\nBattery idle interval: "<<cpuOptions.earlyIdle<<L"; requested us="<<cpuOptions.idleUs
+       <<L" (Efficiency only; restores captured interval for Burst/Compute; not a physical-state guarantee)"
        <<L"\nEPP scope: existing plan/overlay overrides only; OS/firmware may override effective EPP.\n";
     for(const GUID& scheme:{plan,GUID_POWER_MODE_BEST_EFFICIENCY,GUID_POWER_MODE_BEST_PERFORMANCE}) {
         out<<L"\n"<<guidText(scheme)<<L"\n";

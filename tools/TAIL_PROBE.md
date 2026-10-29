@@ -1,8 +1,10 @@
-# PulseTailProbe 0.2
+# PulseTailProbe 0.3
 
 An independent Windows x64 diagnostic executable for comparing workload completion, CPU-policy release and battery-reported discharge. It is not a resident service and does not change power settings. Pulse does not launch it or link its telemetry code.
 
 ## Run
+
+New: `--require-battery` requires confirmed DC before capture and aborts at the next sample on AC or unknown source. It does not change power settings. HWiNFO v2 revision 1 is now supported with bounded payload copying; [live validation and limits](../docs/radeon-idle-investigation.md) are recorded separately.
 
 Double-click `PulseTailProbe.exe` for a 90-second read-only capture. It writes a timestamped directory under `TailCaptures` beside the executable and exits. To include HWiNFO's existing values, the live Sensors window must be running with Shared Memory Support enabled before starting the recorder. Keep its usual polling interval. HWiNFO is optional; missing shared data is explicitly reported.
 

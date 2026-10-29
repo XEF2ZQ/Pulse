@@ -1,5 +1,11 @@
 # Validation
 
+**1.4.3 weak charger:** [evidence and limits](weak-charger.md#validation--23-october-2026): twelve native suites passed; the user's USB-C disconnect/reconnect changed ASUS mode 6→0→6 while Windows AC stayed 0; real AC-to-DC passthrough/adaptive transactions and exact restoration passed.
+
+**1.4.2 PCIe guard:** [validation and limits](pcie-battery-guard.md#validation--19-october-2026): eleven suites passed; three live DC corrections took 391–422 ms; saved off/on restart and unchanged AC values passed. Live AC transition and reboot remain untested.
+
+**19 October 2026 diagnostic patch:** [Radeon investigation evidence](radeon-idle-investigation.md#local-measurements-and-validation) records ten passing native suites, 1,562 checks with live-frame replay, and a completed battery capture with HWiNFO v2. AC guard checks are deferred; no GPU energy improvement is claimed. This supersedes the older missing-component-data limitation for this new baseline only.
+
 For **1.4.1-cpu-options-preview**, see the dated [CPU options validation](cpu-options.md#validation--1-october-2026): ten CTest entries passed and a manual Windows-policy transaction verified source isolation, boost-disable precedence and restoration. Hardware C-state control and battery benefits were not validated. The older results below retain their original scope.
 
 For the current **1.2.0-demand-preview**, see [productive-demand patch validation](productive-demand-patch.md). Results below are the historical 1.0–1.1.2 baseline, not new-release claims.

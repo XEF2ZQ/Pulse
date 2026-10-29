@@ -12,3 +12,4 @@ The root [rights notice](LICENSE) reserves rights in the project materials. Publ
 - GitHub Actions used by the CI workflow are independently maintained projects under their own terms.
 - PulseTailProbe's shared-memory parser is an original implementation of the public HWiNFO interface layout. HWiNFO, G Helper and their drivers/modules are not bundled. Python analysis uses the standard library; optional plot regeneration uses Matplotlib, which is not included in the runtime package. Published figures and sanitized measurements are project evidence, not third-party benchmark results.
 - Windows, Microsoft, ASUS, AMD, Intel and other product names identify compatibility or test environments. No affiliation or endorsement is implied.
+

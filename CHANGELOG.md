@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.4.3.2-cadence-preview — local 1.4.3-line patch, 2026-10-27
+
+- Commit the active power plan only after an actual policy-value write; include pending static configuration writes in that decision. Repeated settled requests perform no writes or plan activation.
+- Keep existing event triggers and adaptive monitoring cadence. No new timer, shorter sampling interval or speculative fabric operation.
+- Add diagnostic plan-commit counts and explicit live regression checks for repeated requests and static-only configuration. All 13 native suites, live restoration/source-isolation checks and parent-failure recovery passed.
+- Leave the shorter Windows idle-policy interval OFF by default; no physical C-state or battery improvement is claimed.
+
+## 1.4.3.1-idle-policy-preview — local 1.4.3-line patch, 2026-10-27
+
+- Add an opt-in battery Efficiency-only Windows idle-policy interval editor (100–50,000 us); preserve the captured interval for Burst/Compute and exclude AC/weak chargers.
+- Reuse journaled ownership with v5 recovery, readback and external-change preservation; no extra resident timer or hardware access.
+- Validate 13 native suites, actual apply/readback/restoration, source exclusions and recovery after simulated parent failure. Four paired policy-call timing runs do not prove faster hardware sleep entry; keep the option OFF by default.
+- Keep 1.4.4 platform/panel work separate and explicitly experimental. No fabric-clock or direct C-state force operation is added.
+
+See [the idle-policy decision and results](docs/battery-idle-interval.md).
+
+## 1.4.3-weak-charger-preview — local patch, 2026-10-23
+
+- Recognize the tested ASUS USB-C charger even when Windows reports AC offline, using a read-only charger query and filtered connection events; use the Windows charging flag as a generic fallback.
+- Temporarily map AC profiles into Windows' active DC policy slot with journaled restoration; preserve the existing plugged-in adaptive-control choice and leave actual AC values unchanged.
+- Add a default-on Efficiency options selection, source diagnostics and explicit weak-charger UI status.
+- Validate real unplug/reconnect notifications, both AC-profile mapping paths and restoration, plus twelve native suites. No charger-wattage, cross-device coverage or energy-saving claim.
+
+## 1.4.2-pcie-guard-preview — local patch, 2026-10-19
+
+- Default-on battery PCIe ASPM guard, selectable in Efficiency options; persistent preference, no AC writes.
+- Observe active-plan and PCIe setting changes with bounded thread-pool notifications; correct drift, verify readback, avoid redundant writes and back off on failure.
+- Keep permanent DC preference across CPU Pause/exit; resume the saved guard selection at normal Pulse startup.
+- Validate eleven native suites and live correction/disable/restart behavior. Physical charger transitions and reboot remain untested; no measured energy gain is claimed.
+
 ## 1.4.0-controls-preview — local patch, 2026-09-18
 
 - Add three native pages and editable AC/DC core-parking, minimum-processor-state and heterogeneous/thread scheduling policies matching the supplied ParkControl controls.

@@ -20,6 +20,8 @@ build = root/'build-native'
 ninja = shutil.which('ninja.exe')
 if not ninja:
     ninja = str(vs/'Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe')
-subprocess.run(['cmake','-S',str(root),'-B',str(build),'-G','Ninja',f'-DCMAKE_MAKE_PROGRAM={ninja}','-DCMAKE_CXX_COMPILER=cl.exe','-DCMAKE_BUILD_TYPE=Release'],env=env,check=True)
+optional_sdks = [f'-D{name}={env[name]}' for name in
+                 ('PULSE_ADL_SDK_ROOT', 'PULSE_ADLX_SDK_ROOT') if name in env]
+subprocess.run(['cmake','-S',str(root),'-B',str(build),'-G','Ninja',f'-DCMAKE_MAKE_PROGRAM={ninja}','-DCMAKE_CXX_COMPILER=cl.exe','-DCMAKE_BUILD_TYPE=Release', *optional_sdks],env=env,check=True)
 subprocess.run(['cmake','--build',str(build),'--parallel','2'],env=env,check=True)
 subprocess.run(['ctest','--test-dir',str(build),'--output-on-failure'],env=env,check=True)

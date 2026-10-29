@@ -1,5 +1,14 @@
 # Architecture
 
+The [1.4.3-line idle interval patch](battery-idle-interval.md) adds optional DC-only policy timing through the existing state/ownership path. It does not include the experimental 1.4.4 panel observer or platform page.
+
+
+The [weak-charger patch](weak-charger.md) separates physical supply detection from Windows' selected AC/DC policy slot. It uses validated ASUS charger events plus a charging-flag fallback, and journaled AC-to-DC mapping when those sources disagree. Charger presence never comes from arbitrary USB attachment or battery-rate sign alone.
+
+The [battery PCIe guard](pcie-battery-guard.md) is a separate default-on persistent DC policy preference. It uses registry/power events and bounded correction retries independently of the temporary CPU controller. It does not add sensor polling or modify AC ASPM.
+
+The [Radeon idle investigation](radeon-idle-investigation.md) adds standalone capability discovery and corrects the diagnostic HWiNFO reader. Neither tool is linked into the resident controller. GPU power controls remain driver-owned.
+
 The [AMD SMI / Strix deep-idle decision](amd-idle-api-review.md) records why the
 newly proposed HSMP, HWCR and PCI recipes do not establish a supported actuator
 on the Windows HX370 target. This investigation changes no runtime behavior.
