@@ -1,0 +1,9 @@
+physical=4 logical=8 groups=1
+transaction_error=0
+apply_readback_ms=0.013
+observed_inside=2263 outside=0
+foreground_rescue_ms=2.7437 clear=1
+selected=1 compute_released=1 coordinator_cpu_ms=15.625 duration_ms=12141 handles_start=97 handles_end=97
+crash_owned=1 recovery=0 restored=1
+passed=1
+Exploratory CPU-placement test only. Energy, browser/media and full power-tier A/B gates remain unmeasured.

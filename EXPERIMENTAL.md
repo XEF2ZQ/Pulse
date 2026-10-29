@@ -1,11 +1,12 @@
-# Pulse 1.4.4 — experimental
+# Pulse experimental line
 
-This source line contains the optional, version-specific AMD panel observer and
-platform-idle investigation. It is experimental, not the user's active baseline.
-The desktop installation was rolled back to 1.4.3 at the user's request.
+This branch continues from preserved 1.4.4-platform-idle-preview. The current
+candidate is **1.5.0-experimental**, with battery-only adaptive scheduling.
 
-Development requested on 27 October 2026 continues separately in
-`../pulse-1.4.3-idle`, based on the 1.4.3 feature set with the 1.4.4 panel/platform
-feature excluded. Do not automatically redeploy this 1.4.4 line.
+New scheduling controls remain off until explicitly enabled. This is not the
+installed standard build and must not silently replace its startup entry.
+See [branch policy](BRANCHES.md), [implementation](docs/adaptive-experimental.md)
+and [evidence](docs/evidence/2026-10-29-adaptive/README.md).
 
-No complete PSR/DF/GFXOFF actuator set or hardware-idle improvement is claimed.
+The earlier platform observer remains available. No new firmware-level PSR,
+DF/GFXOFF, undervolt or SMU power-limit actuator is claimed.

@@ -2,7 +2,7 @@ name: Windows build and tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, standard, experimental]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -27,6 +27,8 @@ jobs:
         run: ctest --test-dir build -C Release -L unit --output-on-failure
       - name: Test offline recovery and component evidence
         run: python -m unittest discover -s tools -p "test_*.py"
+      - name: Test adaptive trace replay
+        run: python -m unittest discover -s tests -p "test_*.py"
       - name: Reproduce published battery summaries
         run: python tools/verify_published_evidence.py
       - name: Upload unsigned engineering build and test log
@@ -38,6 +40,9 @@ jobs:
           path: |
             build/Release/Pulse.exe
             build/Release/PulseTailProbe.exe
+            build/Release/PulseAdaptiveProbe.exe
+            docs/adaptive-experimental.md
+            BRANCHES.md
             build/Testing/Temporary/LastTest.log
             tools/TAIL_PROBE.md
             tools/analyze_tail.py

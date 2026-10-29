@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.0-experimental — acceptance-gated candidate, 2026-10-29
+
+- Split continuing `standard` and `experimental` source lines; preserve the installed standard build.
+- Add process-default CPU Sets with deterministic physical-core/SMT/LLC selection, behavioral compute rescue, full-path overrides and a settings window.
+- Add bounded background candidates and optional execution-speed EcoQoS, independent of power tiers; scheduling defaults off.
+- Gate adaptive tiers and new scheduling to known battery power. Recognized weak chargers release ownership; legacy AC overrides cannot enable this controller.
+- Add durable PID/creation-time recovery, coalesced process-exit waits, shared discovery, write budgets and nonredundant plan commits.
+- Add owned-worker validation and offline threshold/EWMA/CUSUM replay. Fourteen native suites passed; actual selected-core execution failed in three of five local probe runs. Broad performance/energy acceptance remains open.
+- See [implementation report](docs/adaptive-experimental.md) for exact scope, API contracts, evidence and unsupported cases.
+
 ## 1.4.4-platform-idle-preview — EXPERIMENTAL, preserved separately, 2026-10-26
 
 - Add a platform-idle page with explicit availability for PSR/replay, DF C-states, GFXOFF/gating and PCIe. Existing DC ASPM guard remains the sole writer; its persistent preference semantics are unchanged.

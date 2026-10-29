@@ -72,8 +72,9 @@ DWORD Power::write(const GUID& scheme,DWORD index,bool ac,DWORD value) {
     DWORD old=0; DWORD e=read(scheme,index,ac,old); if(e)return e; if(old==value)return ERROR_SUCCESS;
     e=ac?PowerWriteACValueIndex(nullptr,&scheme,&GUID_PROCESSOR_SETTINGS_SUBGROUP,&settings()[index].id,value):
         PowerWriteDCValueIndex(nullptr,&scheme,&GUID_PROCESSOR_SETTINGS_SUBGROUP,&settings()[index].id,value);
-    if(e)return e; ++writes; DWORD actual=0; e=read(scheme,index,ac,actual); return e?e:actual==value?ERROR_SUCCESS:ERROR_WRITE_FAULT;
+    if(e)return e; ++writes; commitPending=true; DWORD actual=0; e=read(scheme,index,ac,actual); return e?e:actual==value?ERROR_SUCCESS:ERROR_WRITE_FAULT;
 }
+DWORD Power::commit(const GUID& scheme) { const DWORD error=PowerSetActiveScheme(nullptr,&scheme); if(!error){++planCommits;commitPending=false;} return error; }
 bool Power::hasJournal()const { return GetFileAttributesW(journalPath().c_str())!=INVALID_FILE_ATTRIBUTES; }
 DWORD Power::saveJournal() {
     CreateDirectoryW((appFolder()+L"\\state").c_str(),nullptr);
@@ -130,7 +131,7 @@ DWORD Power::capture(DWORD sourceMask, bool includeCpuOptions) {
     if(hasJournal())return ERROR_ALREADY_EXISTS;
     if(!available())return ERROR_CALL_NOT_IMPLEMENTED;
     if(!cpuOptions.valid())return ERROR_INVALID_PARAMETER;
-    saved=Snapshot{}; saved.owner=GetCurrentProcessId(); DWORD e=activeScheme(saved.scheme); if(e)return e;
+    commitPending=false; saved=Snapshot{}; saved.owner=GetCurrentProcessId(); DWORD e=activeScheme(saved.scheme); if(e)return e;
     e=mode(true,saved.acMode); if(e)return e; e=mode(false,saved.dcMode); if(e)return e;
     for(const GUID& scheme:{saved.scheme,GUID_POWER_MODE_BEST_EFFICIENCY,GUID_POWER_MODE_BEST_PERFORMANCE}) {
         for(DWORD i=0;i<settings().size();++i) {
@@ -186,7 +187,7 @@ DWORD Power::persistProfiles() {
             e=write(r.scheme,r.setting,ac,ac?r.targetAc:r.targetDc);if(e)break;
         }
     }
-    if(!e)e=PowerSetActiveScheme(nullptr,&saved.scheme);
+    if(!e)e=commit(saved.scheme);
     if(!e){GUID current{};e=activeScheme(current);if(!e&&current!=saved.scheme)e=ERROR_INVALID_STATE;}
     for(DWORD i=0;i<saved.count&&!e;++i){
         const auto& r=saved.rows[i];if(settings()[r.setting].dynamic)continue;
@@ -204,17 +205,16 @@ DWORD Power::apply(PowerState state) {
     if(!owned)return ERROR_INVALID_STATE;
     GUID current{}; DWORD e=activeScheme(current); if(e)return e; if(current!=saved.scheme)return ERROR_INVALID_STATE;
     LARGE_INTEGER begin,end,freq; QueryPerformanceCounter(&begin); QueryPerformanceFrequency(&freq);
-    bool boostChanged=false;
+
     for(DWORD i=0;i<saved.count;++i) {
         const auto& r=saved.rows[i]; if(!settings()[r.setting].dynamic)continue;
         for(bool ac:{true,false}) { if(!(r.mask&(ac?1:2)))continue; DWORD old=0; e=read(r.scheme,r.setting,ac,old); if(e)return e;
             const DWORD boost=acPassthrough?(ac?r.targetAc:r.targetDc):cpuOptions.boost(state,ac||dcUsesAcProfile);
-            if(old!=boost)boostChanged=true;
-            e=write(r.scheme,r.setting,ac,boost); if(e)return e;
+            if(old!=boost){e=write(r.scheme,r.setting,ac,boost); if(e)return e;}
         }
     }
     // Writes to the active plan need one explicit commit (never spawn powercfg).
-    if(boostChanged||state==PowerState::Efficiency) { e=PowerSetActiveScheme(nullptr,&saved.scheme); if(e)return e; }
+    if(commitPending) { e=commit(saved.scheme); if(e)return e; }
     SYSTEM_POWER_STATUS status{}; if(!GetSystemPowerStatus(&status))return GetLastError();
     DWORD mask=0;for(DWORD i=0;i<saved.count;++i)mask|=saved.rows[i].mask;
     if(!(mask&(status.ACLineStatus==1?1:2)))return ERROR_RETRY;
@@ -253,7 +253,7 @@ DWORD Power::restore(DWORD expectedOwner) {
         }
     }
     GUID active{}; e=activeScheme(active); if(e&&!firstError)firstError=e;
-    if(!e&&active==snap.scheme) { e=PowerSetActiveScheme(nullptr,&active); if(e&&!firstError)firstError=e; }
+    if(!e&&active==snap.scheme) { e=commit(active); if(e&&!firstError)firstError=e; }
     DWORD mask=0;for(DWORD i=0;i<snap.count;++i)mask|=snap.rows[i].mask;
     for(bool ac:{true,false}) {
         if(!(mask&(ac?1:2)))continue;
@@ -269,7 +269,7 @@ std::wstring Power::report()const {
     std::wostringstream out; GUID plan{},ac{},dc{},effective{};
     auto p=activeScheme(plan),a=mode(true,ac),d=mode(false,dc),f=effectiveMode(effective);
     SYSTEM_POWER_STATUS status{}; GetSystemPowerStatus(&status);
-    out<<L"Pulse 1.4.4 - Windows power diagnostics\nNative power-mode API: "<<(available()?L"available":L"unavailable")
+    out<<L"Pulse 1.5.0 experimental - Windows power diagnostics\nNative power-mode API: "<<(available()?L"available":L"unavailable")
        <<L"\nPower source: "<<(status.ACLineStatus==1?L"AC":status.ACLineStatus==0?L"Battery":L"Unknown")
        <<L"\nBattery: "<<(unsigned)status.BatteryLifePercent<<L"%\nEnergy Saver: "<<(unsigned)status.SystemStatusFlag
        <<L"\nPlan: "<<guidText(plan)<<L" ("<<p<<L")\nAC mode: "<<guidText(ac)<<L" ("<<a<<L")\nDC mode: "<<guidText(dc)<<L" ("<<d<<L")"

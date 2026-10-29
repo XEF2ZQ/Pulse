@@ -1,0 +1,9 @@
+Process CPU Sets: 0 controlled; acceptance-gated experimental
+Four physical cores in lowest OS efficiency class / one verified LLC; LP-E identity unknown
+Physical efficient cores: 4; selected IDs: 264 265 266 267 268 269 270 271
+Tier control: 1; process compute evidence: 0
+Placement tracked: 0; scans: 4; reads: 13; writes: 2; restores: 2
+Conflicts: 0; skipped: 0; coordinator calls: 13
+Lifecycle: coalesced process-exit waits and shared discovery / 5-second reconciliation; no kernel ETW session
+OEM/firmware power ceilings: externally owned; no PPT writes
+CPU Sets are soft requests; explicit thread sets and affinity remain authoritative.

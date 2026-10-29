@@ -25,3 +25,7 @@ optional_sdks = [f'-D{name}={env[name]}' for name in
 subprocess.run(['cmake','-S',str(root),'-B',str(build),'-G','Ninja',f'-DCMAKE_MAKE_PROGRAM={ninja}','-DCMAKE_CXX_COMPILER=cl.exe','-DCMAKE_BUILD_TYPE=Release', *optional_sdks],env=env,check=True)
 subprocess.run(['cmake','--build',str(build),'--parallel','2'],env=env,check=True)
 subprocess.run(['ctest','--test-dir',str(build),'--output-on-failure'],env=env,check=True)
+
+# Deterministic offline policy replay uses the same Python interpreter.
+import sys
+subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", str(root/"tests"), "-p", "test_*.py"], check=True)

@@ -1,0 +1,12 @@
+defaultOff=1 offPersisted=1 offText=1 onPersisted=1 onText=1 layout=1 noPowerWrites=1 batteryOnly=1 efficiencyDefault=1 efficiencyLayout=1 powerPage=1 invalidRejected=1 previewValidated=1 uvPage=1 cpuPage=1 cpuReject=1 cpuPreview=1 cpuDraftRestored=1 idleReject=1 idlePreview=1 cpuLayout=1 platformPage=1 platformReadOnly=1
+Process placement OFF / Windows scheduling
+No verified efficient-four topology
+Physical efficient cores: 0; selected IDs:
+Tier control: 1; process compute evidence: 0
+Placement tracked: 0; scans: 0; reads: 0; writes: 0; restores: 0
+Conflicts: 0; skipped: 0; coordinator calls: 0
+Lifecycle: coalesced process-exit waits and shared discovery / 5-second reconciliation; no kernel ETW session
+OEM/firmware power ceilings: externally owned; no PPT writes
+CPU Sets are soft requests; explicit thread sets and affinity remain authoritative.
+
+Adaptive settings controls=1 saved=1 restore=1

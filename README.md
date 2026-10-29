@@ -3,6 +3,13 @@
 <p align="center"><strong>Responsive Windows power policy with bounded overhead and recoverable settings.</strong></p>
 <p align="center">C++20 · Native Win32 · Windows 11 x64 · Battery-first · G Helper companion</p>
 
+**This is the experimental branch — 1.5.0 candidate.** New battery-only process
+CPU Sets, background consolidation and optional EcoQoS are implemented but remain
+OFF by default. Exact four-core execution failed intermittently despite accepted
+API readback. Read the [implementation and limits](docs/adaptive-experimental.md),
+[measured evidence](docs/evidence/2026-10-29-adaptive/README.md) and
+[branch policy](BRANCHES.md). The standard installation is preserved separately.
+
 Pulse temporarily gives interactive requests and productive CPU work more performance headroom, then returns to an efficient baseline. It addresses a practical tradeoff: permanently disabling boost can make a laptop sluggish; treating every busy interval as performance-critical can waste energy during routine media or voice use.
 
 The implementation combines foreground intent, measured process-tree CPU demand, bounded process-exit notifications and a source-specific recovery journal. It uses Windows policy APIs and leaves hardware tuning to G Helper/OEM firmware.
@@ -47,7 +54,7 @@ The implementation combines foreground intent, measured process-tree CPU demand,
 
 Productive work takes priority over momentary UI bursts. Known tools have a faster candidate path; unfamiliar process trees can qualify through CPU-time evidence. Editing intent opens a short observation window and still needs measured demand. Detection is sampled and cannot recognize every workload or guarantee instantaneous transitions. See [productive-demand validation](docs/productive-demand-patch.md).
 
-The plugged-in button enables the controller on AC. These are policy requests, not direct clock commands. Firmware, thermals and OEM configuration determine physical frequency and power. The label Efficient Aggressive does not establish an efficiency advantage on a particular CPU.
+On this experimental line, adaptive tiers and new scheduling are battery-only; the plugged-in button is disabled. The standard branch retains optional AC control. These are policy requests, not direct clock commands. Firmware, thermals and OEM configuration determine physical frequency and power. The label Efficient Aggressive does not establish an efficiency advantage on a particular CPU.
 
 ## Measurement highlights
 

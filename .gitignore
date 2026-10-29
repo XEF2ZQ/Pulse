@@ -1,6 +1,8 @@
 /build*/
 /out/
 /dist/
+/validation-*/
+adaptive-test-*.ini
 **/TailCaptures/
 /.vs/
 /.idea/

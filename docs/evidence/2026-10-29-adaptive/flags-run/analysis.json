@@ -1,0 +1,100 @@
+{
+  "scope": "controlled worker only; not calibrated for production workload mix",
+  "models": [
+    {
+      "model": "baseline",
+      "confusion": {
+        "tp": 25,
+        "fp": 8,
+        "tn": 25,
+        "fn": 7
+      },
+      "transitions": 3,
+      "compute_onset_ms": [
+        1561.3899999999999,
+        768.7999999999993
+      ],
+      "samples": 65
+    },
+    {
+      "model": "ewma",
+      "confusion": {
+        "tp": 23,
+        "fp": 9,
+        "tn": 24,
+        "fn": 9
+      },
+      "transitions": 3,
+      "compute_onset_ms": [
+        1048.9300000000003,
+        1785.1000000000004
+      ],
+      "samples": 65
+    },
+    {
+      "model": "cusum",
+      "confusion": {
+        "tp": 26,
+        "fp": 24,
+        "tn": 9,
+        "fn": 6
+      },
+      "transitions": 3,
+      "compute_onset_ms": [
+        1048.9300000000003,
+        1020.2000000000007
+      ],
+      "samples": 65
+    }
+  ],
+  "timers": {
+    "50": {
+      "n": 5,
+      "mean_lateness_ms": 13.725919999999999,
+      "stdev_ms": 4.505676884442559,
+      "max_lateness_ms": 17.877499999999998,
+      "zero_cpu_samples": 0
+    },
+    "100": {
+      "n": 5,
+      "mean_lateness_ms": 10.884599999999997,
+      "stdev_ms": 7.173090289408047,
+      "max_lateness_ms": 22.548000000000002,
+      "zero_cpu_samples": 0
+    },
+    "150": {
+      "n": 5,
+      "mean_lateness_ms": 9.2166,
+      "stdev_ms": 10.464120330921272,
+      "max_lateness_ms": 15.550999999999988,
+      "zero_cpu_samples": 0
+    },
+    "250": {
+      "n": 5,
+      "mean_lateness_ms": 8.7322,
+      "stdev_ms": 2.644249175096771,
+      "max_lateness_ms": 13.038999999999987,
+      "zero_cpu_samples": 0
+    },
+    "1000": {
+      "n": 5,
+      "mean_lateness_ms": 2.5039999999999965,
+      "stdev_ms": 1.8690184589778833,
+      "max_lateness_ms": 4.769999999999982,
+      "zero_cpu_samples": 0
+    }
+  },
+  "placement_ab": {
+    "all": {
+      "n": 4,
+      "mean_ms": 473.47825,
+      "stdev_ms": 12.03264122778814
+    },
+    "four": {
+      "n": 4,
+      "mean_ms": 474.6165,
+      "stdev_ms": 4.100361406835589
+    }
+  },
+  "decision": "Retain existing threshold baseline; new restriction controls stay opt-in. These trials cannot satisfy energy/media/interactive acceptance gates."
+}

@@ -4,7 +4,7 @@ static undervolt::Capability uvCapability;
 static std::wstring profileMessage =
     L"Apply saves both AC and battery settings to the current Windows plan.";
 static constexpr int PageHome = 201, PagePower = 202, PageUv = 203, PageCpu = 204, ProfileApply = 210,
-                     ProfileReset = 211, PlacementButton = 212;
+                     ProfileReset = 211, PlacementButton = 212, AdaptiveSettings = 213;
 static constexpr int AcBase = 240, DcBase = 260, UvP = 301, UvE = 302, UvPSlider = 303,
                      UvESlider = 304, UvApply = 305, UvMonitor = 306, UvRefresh = 307,
                      ProfileStatus = 308, UvStatus = 309;
@@ -164,9 +164,9 @@ static void makePages() {
     pageButton(1, ProfileApply, L"Apply AC + battery", 42, 618, 228, 38);
     pageButton(1, ProfileReset, L"Load Pulse defaults", 286, 618, 218, 38);
     pageButton(1, PlacementButton, L"Adaptive scheduler: OFF", 42, 676, 340, 38);
+    pageButton(1, AdaptiveSettings, L"Experimental policy settings", 400, 676, 350, 38);
     pageLabel(1,
-              L"Moves eligible low-priority background threads to efficient CPU sets.\nReleases "
-              L"them for foreground work, CPU pressure or performance demand.",
+              L"Four physical efficient cores for verified everyday processes.\nCompute and latency rescues restore Windows scheduling; unknown roles stay untouched.",
               42, 725, 710, 42, fontSmall);
     pageLabel(1, profileMessage.c_str(), 42, 780, 710, 49, fontSmall, ProfileStatus);
     pageLabel(2, L"CPU undervolt", 42, 138, 710, 43, hero);

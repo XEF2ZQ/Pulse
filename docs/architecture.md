@@ -1,3 +1,5 @@
+> **Experimental 1.5.0:** the integrated process controller and battery-only source rules are documented in [the current architecture supplement](adaptive-experimental.md). Older per-thread/AC descriptions below describe earlier releases.
+
 # Architecture
 
 The [platform-idle patch](platform-idle.md) separates hardware evidence from control. An on-demand child process reads configuration, firmware restrictions and bounded activity samples. The main process uses a one-shot completion wait and adds no periodic observer. PSR, DF and GFXOFF writers remain unavailable until their runtime contracts and restoration are verified; the existing PCIe guard remains the sole ASPM policy owner.

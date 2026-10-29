@@ -1,0 +1,4 @@
+ac=0 battery_percent=29 saver=0
+physical=4 logical=8 groups=1
+transaction_error=0
+transactions_only=1 passed=1

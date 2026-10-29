@@ -50,8 +50,11 @@ public:
     Snapshot saved{};
     double lastApplyMs = 0;
     uint64_t writes = 0;
+    uint64_t planCommits = 0;
     std::wstring report() const;
 private:
+    DWORD commit(const GUID&);
+    bool commitPending = false;
     using GetMode = DWORD (WINAPI*)(GUID*);
     using SetMode = DWORD (WINAPI*)(const GUID*);
     GetMode getAc = nullptr, getDc = nullptr, getEffective = nullptr;

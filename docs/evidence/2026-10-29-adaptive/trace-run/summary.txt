@@ -1,0 +1,16 @@
+physical=4 logical=8 groups=1
+transaction_error=0
+apply_readback_ms=0.0656
+observed_inside=48 outside=2830
+worker_explicit_cpu_sets=0 affinity=16777215 group=0
+location_8=18
+location_14=30
+location_20=479
+location_21=1307
+location_22=542
+location_23=502
+foreground_rescue_ms=2.2716 clear=1
+selected=1 compute_released=1 coordinator_cpu_ms=0 duration_ms=12125 handles_start=98 handles_end=98
+crash_owned=1 recovery=0 restored=1
+passed=0
+Exploratory CPU-placement test only. Energy, browser/media and full power-tier A/B gates remain unmeasured.

@@ -202,6 +202,7 @@ class ProductiveMonitor {
     void clear() {
         entries_.clear();
         rejected_.clear();
+        snapshot_.clear();
         discoveryAt_ = allReadAt_ = interactionUntil_ = fastUntil_ = 0;
         cpu = 0;
         active = pending = false;
@@ -235,6 +236,7 @@ class ProductiveMonitor {
         return now < interactionUntil_ ? 125 : active || pending || now < fastUntil_ ? 250 : 1000;
     }
     size_t tracked() const { return entries_.size(); }
+    const std::vector<ProcessIdentity>& snapshot() const { return snapshot_; }
     uint64_t nativeScans() const { return discovery_.nativeCalls; }
     void configure(const std::wstring &list) {
         extra_.clear();
