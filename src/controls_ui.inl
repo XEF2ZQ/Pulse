@@ -14,11 +14,12 @@ static constexpr int CpuEpp = 330, CpuAcEpp = 331, CpuDcEpp = 332, CpuAcBoost = 
 static constexpr int IdleOpen = 350, IdleBack = 351, IdleThresholds = 352, IdleLimit = 353,
                      IdleAcDemote = 354, IdleDcDemote = 355, IdleAcPromote = 356,
                      IdleDcPromote = 357, IdleAcLimit = 358, IdleDcLimit = 359,
-                     IdleApply = 360, IdleDefaults = 361, IdleStatus = 362, IdleSupport = 363,
-                     IdleEarly = 364, IdleInterval = 365;
+                     IdleApply = 360, IdleDefaults = 361, IdleStatus = 362, IdleSupport = 363;
 static void makeCpuPage();
 static void showCpuHardware();
 static void makeIdlePage();
+static void makePlatformPage();
+static void updatePlatformPage();
 static HWND pageControl(int page, int id, const wchar_t *klass, const wchar_t *text, DWORD style,
                         int x, int y, int w, int h, HFONT f = nullptr) {
     HWND c = CreateWindowExW(0, klass, text, WS_CHILD | WS_TABSTOP | style, px(x), px(y), px(w),
@@ -65,8 +66,8 @@ static PageDrafts capturePageDrafts() {
     }
     for (int id : {UvP, UvE})
         result.text.emplace_back(id, controlText(id));
-    for (int id : {CpuAcEpp, CpuDcEpp,IdleAcDemote,IdleDcDemote,IdleAcPromote,IdleDcPromote,IdleInterval}) result.text.emplace_back(id, controlText(id));
-    for (int id : {CpuEpp, CpuAcBoost, CpuDcBoost,IdleThresholds,IdleLimit,IdleEarly})
+    for (int id : {CpuAcEpp, CpuDcEpp,IdleAcDemote,IdleDcDemote,IdleAcPromote,IdleDcPromote}) result.text.emplace_back(id, controlText(id));
+    for (int id : {CpuEpp, CpuAcBoost, CpuDcBoost,IdleThresholds,IdleLimit})
         result.checks.emplace_back(id, SendDlgItemMessageW(window,id,BM_GETCHECK,0,0));
     result.combos.emplace_back(CpuVendor,SendDlgItemMessageW(window,CpuVendor,CB_GETCURSEL,0,0));
     for(int id:{IdleAcLimit,IdleDcLimit})result.combos.emplace_back(id,SendDlgItemMessageW(window,id,CB_GETCURSEL,0,0));
@@ -204,6 +205,7 @@ static void makePages() {
     refreshUv();
     makeCpuPage();
     makeIdlePage();
+    makePlatformPage();
 }
 static void showPage(int page) {
     currentPage = page;
@@ -221,12 +223,14 @@ static void showPage(int page) {
 }
 #include "cpu_ui.inl"
 #include "idle_ui.inl"
+#include "platform_idle_ui.inl"
 static void destroyPages() {
     for (const auto &[h, p] : pageControls)
         DestroyWindow(h);
     pageControls.clear();
 }
 static void updatePages() {
+    if(currentPage==5)updatePlatformPage();
     setControlText(PlacementButton, placementController.enabled ? L"Adaptive scheduler: ON"
                                                                 : L"Adaptive scheduler: OFF");
     setControlText(ProfileStatus, profileMessage);

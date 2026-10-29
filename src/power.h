@@ -16,7 +16,7 @@ struct Setting { GUID id; const wchar_t* name; DWORD ac, dc; bool dynamic; };
 const std::vector<Setting>& settings();
 struct Row { GUID scheme; DWORD setting, ac, dc, mask, targetAc, targetDc; };
 struct Snapshot {
-    DWORD magic = 0x50554C53, version = 5, owner = 0, count = 0;
+    DWORD magic = 0x50554C53, version = 4, owner = 0, count = 0;
     GUID scheme{}, acMode{}, dcMode{};
     Row rows[48]{};
     DWORD checksum = 0;
@@ -50,7 +50,6 @@ public:
     Snapshot saved{};
     double lastApplyMs = 0;
     uint64_t writes = 0;
-    uint64_t planCommits = 0;
     std::wstring report() const;
 private:
     using GetMode = DWORD (WINAPI*)(GUID*);
@@ -58,8 +57,6 @@ private:
     GetMode getAc = nullptr, getDc = nullptr, getEffective = nullptr;
     SetMode setAc = nullptr, setDc = nullptr;
     DWORD write(const GUID& scheme, DWORD index, bool ac, DWORD value);
-    DWORD commit(const GUID& scheme);
-    bool commitPending = false;
     DWORD saveJournal();
     DWORD loadJournal(Snapshot& out) const;
 };

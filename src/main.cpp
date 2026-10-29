@@ -392,7 +392,6 @@ static std::wstring runtimeReport() {
         <<L"\nWindow paints: "<<paintCount<<L"\nButton paints: "<<buttonPaintCount
         <<L"\nWindows accessibility queries: "<<accessibilityRequests
         <<L"\nPower value writes: "<<power.writes<<L"\nLast power transition ms: "<<fixed(power.lastApplyMs)
-        <<L"\nActive-plan commits: "<<power.planCommits
         <<L"\nForeground notification: "<<(foregroundHook?L"active":L"off")<<L"\nKeyboard navigation: "<<(keyboardRegistered?L"active":L"off")
         <<L"\nRecovery companion: "<<(guardianProcess&&WaitForSingleObject(guardianProcess,0)==WAIT_TIMEOUT?L"waiting":L"off")
         <<L"\nFault: "<<fault<<L"\n\nRecent decisions (no keys, titles, URLs or audio recorded)\n";
@@ -561,6 +560,7 @@ static void efficiencyMenu() {
 }
 static void cleanup() {
     if(shuttingDown)return;shuttingDown=true;
+    stopPlatformProbe();
     if(!reportOnExit.empty())saveText(reportOnExit,runtimeReport());
     turnOff(false);Shell_NotifyIconW(NIM_DELETE,&tray);
     efficiencyOptions.stop();
@@ -588,6 +588,7 @@ static void powerEvent() {
 static LRESULT CALLBACK procedure(HWND h,UINT m,WPARAM w,LPARAM l) {
     if(m==taskbarCreated&&taskbarCreated) {Shell_NotifyIconW(NIM_ADD,&tray);return 0;}
     switch(m) {
+    case PlatformProbeDone:completePlatformProbe(w!=0);return 0;
     case supply::ChangedMessage:if(w)supplyMonitor.failed(static_cast<HRESULT>(l));supplyMonitor.notify(true);return 0;
     case pcie::ChangedMessage:pcieGuard.notify();return 0;
     case efficiency::ChangedMessage:updateUi();return 0;
@@ -664,6 +665,10 @@ static LRESULT CALLBACK procedure(HWND h,UINT m,WPARAM w,LPARAM l) {
         case CpuVendor:if(HIWORD(w)==CBN_SELCHANGE)showCpuHardware();break;
         case IdleOpen:refreshIdleSupport();showPage(4);break;
         case IdleBack:showPage(3);break;
+        case PlatformOpen:showPage(5);updatePlatformPage();break;
+        case PlatformBack:showPage(3);break;
+        case PlatformProbe:if(HIWORD(w)==BN_CLICKED)startPlatformProbe();break;
+        case PlatformPcie:if(HIWORD(w)==BN_CLICKED&&!dryRun){DWORD e=pcieGuard.toggle();if(e)setControlText(PlatformStatus,L"PCIe preference could not be saved: "+std::to_wstring(e));updatePlatformPage();}break;
         case IdleApply:applyIdleUi();break;
         case IdleDefaults:populateIdle(cpu::Options{});setControlText(IdleStatus,L"Defaults loaded into this form. Press Apply to use them.");break;
         case ProfileApply:applyProfilesUi();break;
@@ -719,7 +724,6 @@ static int exercise(const std::wstring& output) {
     DWORD restore=power.restore();report<<L"Restore result: "<<restore<<L"\nAFTER\n"<<power.report();
     if(!saveText(output,report.str()))return ERROR_WRITE_FAULT;return static_cast<int>(e?e:restore);
 }
-#include "idle_exercise.inl"
 static int cpuOptionsExercise(const std::wstring& output) {
     // Manual integration check: no preference writes; guardian owns crash recovery.
     std::wostringstream report;report<<L"CPU options policy exercise; hardware C-states not tested\n";
@@ -737,23 +741,11 @@ static int cpuOptionsExercise(const std::wstring& output) {
         if(error)break;
         const auto snapshot=power.saved;
         SYSTEM_POWER_STATUS source{};GetSystemPowerStatus(&source);
-        unsigned staticChanges=0,dynamicChanges=0;
-        for(DWORD i=0;i<snapshot.count;++i){
-            const auto& row=snapshot.rows[i];
-            for(bool ac:{true,false})if(row.mask&(ac?1:2))
-                if((ac?row.ac:row.dc)!=(ac?row.targetAc:row.targetDc))
-                    ++(settings()[row.setting].dynamic?dynamicChanges:staticChanges);
-        }
-        const auto commitsBefore=power.planCommits;
         // apply() is intentionally refused for the inactive source. Configure
         // still exercises static writes, followed immediately by restoration.
         error=power.configure();
         const bool inactive=!(mask&(source.ACLineStatus==1?1u:2u));
         if(error==ERROR_RETRY&&inactive)error=0;
-        const auto expectedCommits=(staticChanges||dynamicChanges)?1u:0u;
-        if(!error&&power.planCommits-commitsBefore!=expectedCommits)error=ERROR_INVALID_STATE;
-        report<<L"Configure static changes="<<staticChanges<<L" dynamic changes="<<dynamicChanges
-              <<L" commits="<<power.planCommits-commitsBefore<<L"\n";
         report<<L"Configure: "<<error<<L"; inactive source: "<<inactive<<L"\n";
         for(DWORD i=0;i<snapshot.count&&!error;++i) {
             const auto &row=snapshot.rows[i];
@@ -872,22 +864,21 @@ static int schedulerGuiTest(HINSTANCE instance,const std::wstring& output) {
     SendMessageW(window,WM_COMMAND,IdleOpen,0);
     setControlText(IdleDcDemote,L"101");const bool idleReject=currentPage==4&&!applyIdleUi();populateIdle(power.cpuOptions);
     const bool idlePreview=applyIdleUi()&&power.writes==0;
-    setControlText(IdleInterval,L"99");const bool intervalReject=!applyIdleUi();
-    setControlText(IdleInterval,L"100");const auto intervalDraft=capturePageDrafts();
-    populateIdle(power.cpuOptions);restorePageDrafts(intervalDraft);
-    const bool intervalDraftRestored=controlText(IdleInterval)==L"100";
-    const bool intervalControl=GetDlgItem(window,IdleEarly)&&GetDlgItem(window,IdleInterval);
+    SendMessageW(window,WM_COMMAND,PlatformOpen,0);
+    const bool platformPage=currentPage==5&&!IsWindowEnabled(GetDlgItem(window,380))&&!IsWindowEnabled(GetDlgItem(window,381))&&!IsWindowEnabled(GetDlgItem(window,382))&&IsWindowEnabled(GetDlgItem(window,PlatformProbe));
+    SendMessageW(window,WM_COMMAND,PlatformProbe,0);
+    const bool platformReadOnly=platformProcess==nullptr&&power.writes==0;
     RECT cpuTab{},effButton{};GetWindowRect(GetDlgItem(window,PageCpu),&cpuTab);GetWindowRect(GetDlgItem(window,EfficiencyButton),&effButton);
     const bool cpuLayout=cpuTab.right<effButton.left;
     SendMessageW(window,WM_COMMAND,PageHome,0);
     std::wostringstream report;report<<L"defaultOff="<<defaultOff<<L" offPersisted="<<off<<L" offText="<<offText
       <<L" onPersisted="<<on<<L" onText="<<onText<<L" layout="<<layout<<L" noPowerWrites="<<noPowerWrites
       <<L" efficiencyDefault="<<efficiencyDefault<<L" efficiencyLayout="<<efficiencyLayout<<L" powerPage="<<powerPage<<L" invalidRejected="<<invalidRejected<<L" previewValidated="<<previewValidated<<L" uvPage="<<uvPage
-      <<L" cpuPage="<<cpuPage<<L" cpuReject="<<cpuReject<<L" cpuPreview="<<cpuPreview<<L" cpuDraftRestored="<<cpuDraftRestored<<L" idleReject="<<idleReject<<L" idlePreview="<<idlePreview<<L" cpuLayout="<<cpuLayout<<L"\n"<<placementController.report();
+      <<L" cpuPage="<<cpuPage<<L" cpuReject="<<cpuReject<<L" cpuPreview="<<cpuPreview<<L" cpuDraftRestored="<<cpuDraftRestored<<L" idleReject="<<idleReject<<L" idlePreview="<<idlePreview<<L" cpuLayout="<<cpuLayout<<L" platformPage="<<platformPage<<L" platformReadOnly="<<platformReadOnly<<L"\n"<<placementController.report();
     const bool saved=saveText(output,report.str());
     for(auto f:{regular,fontSmall,heading,hero,bold})DeleteObject(f);
     DeleteObject(backgroundBrush);DeleteObject(cardBrush);DestroyWindow(window);window=nullptr;
-    return defaultOff&&off&&offText&&on&&onText&&layout&&noPowerWrites&&efficiencyDefault&&efficiencyLayout&&powerPage&&invalidRejected&&previewValidated&&uvPage&&cpuPage&&cpuReject&&cpuPreview&&cpuDraftRestored&&idleReject&&idlePreview&&cpuLayout&&intervalReject&&intervalDraftRestored&&intervalControl&&saved?0:4;
+    return defaultOff&&off&&offText&&on&&onText&&layout&&noPowerWrites&&efficiencyDefault&&efficiencyLayout&&powerPage&&invalidRejected&&previewValidated&&uvPage&&cpuPage&&cpuReject&&cpuPreview&&cpuDraftRestored&&idleReject&&idlePreview&&cpuLayout&&platformPage&&platformReadOnly&&saved?0:4;
 }
 static int efficiencyPreview(HINSTANCE instance) {
     dryRun=true;autoStart=false;armed=enabled=false;
@@ -944,12 +935,6 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int) {
     if(has(L"--exercise")){int e=exercise(value(L"--exercise"));ReleaseMutex(singleton);CloseHandle(singleton);return e;}
     if(has(L"--charger-exercise")){int e=chargerExercise(value(L"--charger-exercise"));ReleaseMutex(singleton);CloseHandle(singleton);return e;}
     if(has(L"--cpu-options-exercise")){int e=cpuOptionsExercise(value(L"--cpu-options-exercise"));ReleaseMutex(singleton);CloseHandle(singleton);return e;}
-    if(has(L"--idle-interval-comparison")){int e=idleIntervalComparison(value(L"--idle-interval-comparison"));ReleaseMutex(singleton);CloseHandle(singleton);return e;}
-    if(has(L"--idle-interval-exercise")||has(L"--idle-interval-crash")){
-        const bool crash=has(L"--idle-interval-crash");
-        int e=idleIntervalExercise(value(crash?L"--idle-interval-crash":L"--idle-interval-exercise"),crash);
-        ReleaseMutex(singleton);CloseHandle(singleton);return e;
-    }
     DWORD placementRecovery=placement::recover(appFolder());
     if(placementRecovery)profileMessage=L"Scheduler recovery needs attention (Windows "+std::to_wstring(placementRecovery)+L"). New placements are off.";
     placementController.enabled=!placementRecovery&&GetPrivateProfileIntW(L"Preferences",L"PlacementEnabled",0,(appFolder()+L"\\Pulse.ini").c_str())!=0;

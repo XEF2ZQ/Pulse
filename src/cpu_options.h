@@ -1,7 +1,6 @@
 #pragma once
 #include "profile_config.h"
 #include "workload.h"
-#include "idle_policy.h"
 #include <cstring>
 #include <intrin.h>
 
@@ -10,20 +9,16 @@ struct Options {
   bool epp = false, disableBoostAc = false, disableBoostDc = false;
   unsigned acEpp = 50, dcEpp = 80;
   bool idleThresholds = false, idleLimit = false;
-  bool earlyIdle = false;
-  unsigned idleUs = 1000;
   unsigned acDemote = 12, dcDemote = 40, acPromote = 100, dcPromote = 60;
   unsigned acLimit = 0, dcLimit = 0;
   bool valid() const {
     return acEpp <= 100 && dcEpp <= 100 && acDemote <= 100 && dcDemote <= 100 &&
-           acPromote <= 100 && dcPromote <= 100 && acLimit <= 3 && dcLimit <= 3 &&
-           validIdleInterval(idleUs);
+           acPromote <= 100 && dcPromote <= 100 && acLimit <= 3 && dcLimit <= 3;
   }
   bool manages(unsigned index) const {
     return (index == 8 || index == 9)     ? epp
            : (index == 10 || index == 11) ? idleThresholds
            : index == 12                  ? idleLimit
-           : index == 13                  ? earlyIdle
                                           : false;
   }
   DWORD value(unsigned index, bool ac) const {
@@ -37,8 +32,6 @@ struct Options {
       return ac ? acPromote : dcPromote;
     case 12:
       return ac ? acLimit : dcLimit;
-    case 13:
-      return idleUs;
     default:
       return 0;
     }
@@ -106,8 +99,7 @@ inline Options load(const std::wstring &path) {
       {L"DisableBoostAC", &o.disableBoostAc},
       {L"DisableBoostDC", &o.disableBoostDc},
       {L"IdleThresholds", &o.idleThresholds},
-      {L"IdleLimit", &o.idleLimit},
-      {L"EarlyIdle", &o.earlyIdle}};
+      {L"IdleLimit", &o.idleLimit}};
   for (const auto &[key, destination] : flags) {
     unsigned value = 0;
     if (!read(key, 0, value) || value > 1)
@@ -122,10 +114,6 @@ inline Options load(const std::wstring &path) {
   for (const auto &[key, destination] : numbers)
     if (!read(key, *destination, *destination))
       return Options{};
-  wchar_t interval[16]{};
-  GetPrivateProfileStringW(L"CpuOptions", L"IdleIntervalUs", L"1000", interval,
-                           16, path.c_str());
-  if (!parseIdleInterval(interval, o.idleUs)) return Options{};
   return o.valid() ? o : Options{};
 }
 inline bool save(const std::wstring &path, const Options &o) {
@@ -149,8 +137,6 @@ inline bool save(const std::wstring &path, const Options &o) {
       {L"EppDC", o.dcEpp},
       {L"IdleThresholds", o.idleThresholds},
       {L"IdleLimit", o.idleLimit},
-      {L"EarlyIdle", o.earlyIdle},
-      {L"IdleIntervalUs", o.idleUs},
       {L"DemoteAC", o.acDemote},
       {L"DemoteDC", o.dcDemote},
       {L"PromoteAC", o.acPromote},

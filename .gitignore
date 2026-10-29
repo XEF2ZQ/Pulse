@@ -20,6 +20,5 @@ backups/
 *-status.txt
 *-health.json
 platform-idle-*.txt
-validation-20261027/
 .env
 .env.*

@@ -1,20 +1,13 @@
 # Changelog
 
-## 1.4.3.2-cadence-preview — local 1.4.3-line patch, 2026-10-27
+## 1.4.4-platform-idle-preview — EXPERIMENTAL, preserved separately, 2026-10-26
 
-- Commit the active power plan only after an actual policy-value write; include pending static configuration writes in that decision. Repeated settled requests perform no writes or plan activation.
-- Keep existing event triggers and adaptive monitoring cadence. No new timer, shorter sampling interval or speculative fabric operation.
-- Add diagnostic plan-commit counts and explicit live regression checks for repeated requests and static-only configuration. All 13 native suites, live restoration/source-isolation checks and parent-failure recovery passed.
-- Leave the shorter Windows idle-policy interval OFF by default; no physical C-state or battery improvement is claimed.
-
-## 1.4.3.1-idle-policy-preview — local 1.4.3-line patch, 2026-10-27
-
-- Add an opt-in battery Efficiency-only Windows idle-policy interval editor (100–50,000 us); preserve the captured interval for Burst/Compute and exclude AC/weak chargers.
-- Reuse journaled ownership with v5 recovery, readback and external-change preservation; no extra resident timer or hardware access.
-- Validate 13 native suites, actual apply/readback/restoration, source exclusions and recovery after simulated parent failure. Four paired policy-call timing runs do not prove faster hardware sleep entry; keep the option OFF by default.
-- Keep 1.4.4 platform/panel work separate and explicitly experimental. No fabric-clock or direct C-state force operation is added.
-
-See [the idle-policy decision and results](docs/battery-idle-interval.md).
+- Add a platform-idle page with explicit availability for PSR/replay, DF C-states, GFXOFF/gating and PCIe. Existing DC ASPM guard remains the sole writer; its persistent preference semantics are unchanged.
+- Add `PulseIdleProbe`: read-only device topology and last-reported D-state, AMD configuration flags, checksum-validated FADT ASPM prohibition, ASPM/NVMe policy and optional bounded GPU-engine/CPU activity sampling. No residency claims from proxy data.
+- Add optional, exact-driver-hash-guarded panel DPCD reads: the tested eDP panel reports PSR1 already enabled. Reads are battery-only and on demand; PSR actuation and residency remain unverified.
+- Launch diagnostics off the UI thread in a child process, observe completion through a one-shot wait, and stop a stuck child after 45 seconds. No resident diagnostic timer or PDH query remains.
+- Document actual static reverse engineering of the installed AMD stack and a separate elevated PSR query experiment. No private state-changing calls or undocumented hardware writes ship.
+- Validate firmware parsing, GPU instance parsing, source gates, native GUI wiring and live AC refusal/DC capture. This does not complete all four actuators.
 
 ## 1.4.3-weak-charger-preview — local patch, 2026-10-23
 

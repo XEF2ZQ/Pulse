@@ -13,3 +13,16 @@ The root [rights notice](LICENSE) reserves rights in the project materials. Publ
 - PulseTailProbe's shared-memory parser is an original implementation of the public HWiNFO interface layout. HWiNFO, G Helper and their drivers/modules are not bundled. Python analysis uses the standard library; optional plot regeneration uses Matplotlib, which is not included in the runtime package. Published figures and sanitized measurements are project evidence, not third-party benchmark results.
 - Windows, Microsoft, ASUS, AMD, Intel and other product names identify compatibility or test environments. No affiliation or endorsement is implied.
 
+## Optional AMD ADL panel observer
+
+`PulseIdleProbe` can be built against externally supplied official ADL SDK headers. The local panel-enabled build uses checkout `84c881cb2136f04287eb3af12de00a9e2867aa9e`. No AMD driver binary is distributed. The SDK header terms are reproduced here; Pulse's root rights notice does not replace them.
+
+Copyright (c) 2016 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+
+MIT LICENSE:
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

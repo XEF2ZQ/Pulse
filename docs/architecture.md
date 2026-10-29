@@ -1,7 +1,6 @@
 # Architecture
 
-The [1.4.3-line idle interval patch](battery-idle-interval.md) adds optional DC-only policy timing through the existing state/ownership path. It does not include the experimental 1.4.4 panel observer or platform page.
-
+The [platform-idle patch](platform-idle.md) separates hardware evidence from control. An on-demand child process reads configuration, firmware restrictions and bounded activity samples. The main process uses a one-shot completion wait and adds no periodic observer. PSR, DF and GFXOFF writers remain unavailable until their runtime contracts and restoration are verified; the existing PCIe guard remains the sole ASPM policy owner.
 
 The [weak-charger patch](weak-charger.md) separates physical supply detection from Windows' selected AC/DC policy slot. It uses validated ASUS charger events plus a charging-flag fallback, and journaled AC-to-DC mapping when those sources disagree. Charger presence never comes from arbitrary USB attachment or battery-rate sign alone.
 

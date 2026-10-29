@@ -5,8 +5,6 @@
 
 Pulse temporarily gives interactive requests and productive CPU work more performance headroom, then returns to an efficient baseline. It addresses a practical tradeoff: permanently disabling boost can make a laptop sluggish; treating every busy interval as performance-critical can waste energy during routine media or voice use.
 
-**Current local line: 1.4.3.2-cadence-preview.** Avoids redundant power-plan activation while retaining 1.4.3's adaptive monitoring intervals. Includes an [opt-in battery idle interval](docs/battery-idle-interval.md), with tested restoration during performance work and after failure. It does not force C-states or fabric downclocks. The separate 1.4.4 panel/platform investigation is experimental and excluded from this build.
-
 The implementation combines foreground intent, measured process-tree CPU demand, bounded process-exit notifications and a source-specific recovery journal. It uses Windows policy APIs and leaves hardware tuning to G Helper/OEM firmware.
 
 **CPU options, introduced in 1.4.1.** A fourth page provides optional Windows EPP, source-specific boost-disable and idle-threshold controls. Ten native suites and a local Windows-policy apply/readback/restore exercise passed for that patch on one ASUS Ryzen AI 9 HX 370 laptop. Register-level Intel C-state and AMD CC6/PC6 controls remain unavailable, as does undervolt Apply. Read the [CPU-options scope and research](docs/cpu-options.md) and [parking/placement scope](docs/power-controls.md).
@@ -19,6 +17,7 @@ The implementation combines foreground intent, measured process-tree CPU demand,
 
 **PCIe guard, introduced in 1.4.2.** [Default-on battery PCIe guard](docs/pcie-battery-guard.md) maintains maximum DC ASPM savings using change notifications. AC settings are untouched. Local correction and preference-persistence tests passed; physical AC/reboot checks remain pending. This adds no claim of energy savings or a new hosted release.
 
+**Experimental, preserved separately: 1.4.4-platform-idle-preview.** [Platform-idle investigation](docs/platform-idle.md) adds an on-demand native diagnostic and a CPU options → Platform idle power page. It distinguishes verified PCIe policy control from unverified PSR, fabric and GFXOFF controls. It does not claim new hardware actuation or battery-runtime gains. No new resident polling is added. The installed development line has returned to the 1.4.3 feature baseline; this experimental source is retained for investigation.
 
 [Weak-charger detection and reversible AC-profile mapping](docs/weak-charger.md), introduced in 1.4.3, handles the tested ASUS USB-C supply reporting Windows AC offline. Live unplug/reconnect detection and exact DC restoration passed. Hardware support and test limits are documented.
 

@@ -88,6 +88,7 @@ static void makeCpuPage() {
   pageButton(3, CpuDefaults, L"Load defaults", 516, 466, 220, 38);
   pageLabel(3, cpuMessage.c_str(), 42, 515, 710, 37, fontSmall, CpuStatus);
   pageButton(3, IdleOpen, L"Idle states & thresholds...", 42, 553, 280, 29);
+  pageButton(3, 370, L"Platform idle power...", 340, 553, 280, 29);
   HWND vendor = pageControl(3, CpuVendor, L"COMBOBOX", L"",
                             CBS_DROPDOWNLIST | WS_VSCROLL, 42, 590, 223, 100);
   for (const auto *name :
@@ -149,10 +150,6 @@ static bool commitCpuOptions(const cpu::Options &proposed, int statusId) {
     return false;
   if (!cpuCapability.knownVendor() || !power.available())
     return false;
-  if (proposed.earlyIdle && !power.optionAvailable(13, 2)) {
-    setControlText(statusId, L"Battery idle interval lacks a restorable original in this plan.");
-    return false;
-  }
   for (unsigned index : {8u, 10u, 11u, 12u}) {
     if (proposed.manages(index) && !power.optionAvailable(index)) {
       setControlText(
